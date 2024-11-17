@@ -112,24 +112,26 @@ async function getUserTweets(username, mode, numberOfTweets) {
   try {
     page = await twitterScraper.getNewPage();
     
-    // Navigate to the profile with a longer timeout
+    // More reliable mobile user agent
+    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
+    
+    // Navigate to profile with increased timeout
     await page.goto(`https://twitter.com/${username}`, {
       waitUntil: ['networkidle0', 'domcontentloaded'],
       timeout: 60000
     });
 
     // Wait for initial tweets to load
-    await twitterScraper.waitForSelector(page, 'article[data-testid="tweet"]', 30000);
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30000 });
 
-    let loadedTweets = [];
-    let previousTweetCount = 0;
-    let noNewTweetsCount = 0;
-    const maxNoNewTweetsAttempts = 5;
-
-    // Keep scrolling until we have enough tweets or determine we can't get more
-    while (loadedTweets.length < numberOfTweets && noNewTweetsCount < maxNoNewTweetsAttempts) {
+    let loadedTweets = new Set();
+    let previousHeight = 0;
+    let sameHeightCount = 0;
+    const maxRetries = 10;
+    
+    while (loadedTweets.size < numberOfTweets && sameHeightCount < maxRetries) {
       // Extract current tweets
-      loadedTweets = await page.evaluate(() => {
+      const newTweets = await page.evaluate(() => {
         const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
         return tweets.map(tweet => {
           const getTextContent = (selector) => {
@@ -169,49 +171,84 @@ async function getUserTweets(username, mode, numberOfTweets) {
         });
       });
 
-      // Check if we got new tweets
-      if (loadedTweets.length > previousTweetCount) {
-        previousTweetCount = loadedTweets.length;
-        noNewTweetsCount = 0; // Reset the counter as we found new tweets
-        
-        // Log progress
-        logger.info(`Found ${loadedTweets.length} tweets, target: ${numberOfTweets}`);
-      } else {
-        noNewTweetsCount++;
-      }
-
-      // Scroll with a more sophisticated approach
-      await page.evaluate(async () => {
-        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-        
-        // Scroll in smaller increments
-        const scrollHeight = document.body.scrollHeight;
-        const viewportHeight = window.innerHeight;
-        const scrollSteps = 3;
-        
-        for (let i = 0; i < scrollSteps; i++) {
-          window.scrollBy(0, (scrollHeight - viewportHeight) / scrollSteps);
-          await delay(500); // Wait between partial scrolls
+      // Add new tweets to Set to remove duplicates
+      newTweets.forEach(tweet => {
+        if (tweet.id) {
+          loadedTweets.add(JSON.stringify(tweet));
         }
-        
-        // Final scroll to bottom
-        window.scrollTo(0, document.body.scrollHeight);
-        await delay(1000); // Wait after final scroll
       });
 
-      // Wait for potential new tweets to load
-      await page.waitForTimeout(2000);
+      // Get current scroll height
+      const currentHeight = await page.evaluate('document.documentElement.scrollHeight');
+      
+      if (currentHeight === previousHeight) {
+        sameHeightCount++;
+        
+        // Try to trigger load by clicking "Show more tweets" button if present
+        try {
+          await page.evaluate(() => {
+            const showMoreButton = Array.from(document.querySelectorAll('span')).find(
+              span => span.textContent.includes('Show more tweets')
+            );
+            if (showMoreButton) {
+              showMoreButton.click();
+            }
+          });
+        } catch (error) {
+          logger.warn('No "Show more" button found');
+        }
+        
+        // Additional scroll attempts with random offsets
+        await page.evaluate(() => {
+          const randomOffset = Math.floor(Math.random() * 100);
+          window.scrollTo(0, document.documentElement.scrollHeight - randomOffset);
+        });
+        
+      } else {
+        sameHeightCount = 0;
+      }
+
+      previousHeight = currentHeight;
+
+      // Smooth scroll with random delays
+      await page.evaluate(async () => {
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const scrollStep = 100;
+        const steps = 5;
+        
+        for (let i = 0; i < steps; i++) {
+          window.scrollBy(0, scrollStep);
+          await delay(100 + Math.random() * 200);
+        }
+      });
+
+      // Random delay between scrolls
+      await page.waitForTimeout(1000 + Math.random() * 1000);
+
+      // Log progress
+      logger.info(`Found ${loadedTweets.size} unique tweets, target: ${numberOfTweets}`);
+      
+      // Check for Twitter rate limiting or blocking indicators
+      const isBlocked = await page.evaluate(() => {
+        return document.body.textContent.includes('Rate limit exceeded') ||
+               document.body.textContent.includes('Try again later');
+      });
+
+      if (isBlocked) {
+        logger.warn('Possible rate limiting detected');
+        break;
+      }
     }
 
+    // Convert Set back to array and parse stored JSON
+    const uniqueTweets = Array.from(loadedTweets).map(tweet => JSON.parse(tweet));
+    
     logger.info(`Successfully retrieved tweets`, {
       username,
-      tweetCount: loadedTweets.length,
+      tweetCount: uniqueTweets.length,
       requestedCount: numberOfTweets
     });
 
-    // Remove any duplicate tweets based on ID
-    const uniqueTweets = Array.from(new Map(loadedTweets.map(tweet => [tweet.id, tweet])).values());
-    
     return uniqueTweets.slice(0, numberOfTweets);
 
   } catch (error) {
