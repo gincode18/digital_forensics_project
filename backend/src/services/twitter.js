@@ -11,14 +11,34 @@ async function getTwitterUserDetails(username) {
   
   try {
     page = await twitterScraper.getNewPage();
-    await page.goto(`https://twitter.com/${username}`, {
-      waitUntil: 'networkidle0',
+    
+    // Navigate to the profile with mobile user agent first
+    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
+    
+    const response = await page.goto(`https://twitter.com/${username}`, {
+      waitUntil: ['networkidle0', 'domcontentloaded'],
       timeout: 30000
     });
 
-    // Wait for key elements
-    await page.waitForSelector('div[data-testid="primaryColumn"]', { timeout: 5000 });
+    if (!response.ok()) {
+      throw new Error(`HTTP ${response.status()} on ${username}'s profile`);
+    }
 
+    // Wait for key elements with increased timeout
+    const selectors = [
+      '[data-testid="UserName"]',
+      '[data-testid="UserDescription"]',
+      '[data-testid="UserProfileHeader_Items"]'
+    ];
+
+    for (const selector of selectors) {
+      const found = await twitterScraper.waitForSelector(page, selector, 15000);
+      if (!found) {
+        logger.warn(`Selector not found: ${selector}`);
+      }
+    }
+
+    // Extract user details
     const userDetails = await page.evaluate(() => {
       const getTextContent = (selector) => {
         const element = document.querySelector(selector);
@@ -27,26 +47,27 @@ async function getTwitterUserDetails(username) {
 
       const getFollowerCount = (text) => {
         if (!text) return 0;
-        const num = text.replace(/,/g, '').match(/\d+/);
-        return num ? parseInt(num[0]) : 0;
+        text = text.toLowerCase();
+        if (text.includes('k')) {
+          return Math.round(parseFloat(text) * 1000);
+        } else if (text.includes('m')) {
+          return Math.round(parseFloat(text) * 1000000);
+        }
+        return parseInt(text.replace(/,/g, '')) || 0;
       };
 
-      const name = getTextContent('h2[data-testid="UserName"]');
-      const bio = getTextContent('div[data-testid="UserDescription"]');
-      const location = getTextContent('span[data-testid="UserLocation"]');
-      const website = getTextContent('a[data-testid="UserUrl"]');
+      const name = getTextContent('[data-testid="UserName"]');
+      const bio = getTextContent('[data-testid="UserDescription"]');
+      const location = getTextContent('[data-testid="UserLocation"]');
+      const website = getTextContent('[data-testid="UserUrl"]');
       
-      const followingText = getTextContent('a[href*="/following"] span');
-      const followersText = getTextContent('a[href*="/followers"] span');
+      const followingText = getTextContent('[href*="/following"] span');
+      const followersText = getTextContent('[href*="/followers"] span');
       
-      const joinDate = getTextContent('span[data-testid="UserJoinDate"]')
+      const joinDate = getTextContent('[data-testid="UserJoinDate"]')
         .replace('Joined ', '');
 
-      const verified = !!document.querySelector('svg[data-testid="icon-verified"]');
-      
-      // Get profile image URL
-      const imgElement = document.querySelector('img[alt*="Profile image"]');
-      const profileImage = imgElement ? imgElement.src : '';
+      const verified = !!document.querySelector('[data-testid="UserVerifiedBadge"]');
 
       return {
         name,
@@ -59,8 +80,7 @@ async function getTwitterUserDetails(username) {
         stats: {
           following: getFollowerCount(followingText),
           followers: getFollowerCount(followersText)
-        },
-        image: profileImage
+        }
       };
     });
 
@@ -81,6 +101,7 @@ async function getTwitterUserDetails(username) {
   }
 }
 
+// Rest of the twitter.js file remains the same
 async function getUserTweets(username, mode, numberOfTweets) {
   logger.info(`Fetching user tweets`, {
     username,
@@ -92,16 +113,17 @@ async function getUserTweets(username, mode, numberOfTweets) {
   try {
     page = await twitterScraper.getNewPage();
     await page.goto(`https://twitter.com/${username}`, {
-      waitUntil: 'networkidle0',
+      waitUntil: ['networkidle0', 'domcontentloaded'],
       timeout: 30000
     });
 
-    // Wait for tweets to load
-    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 5000 });
+    await twitterScraper.waitForSelector(page, 'article[data-testid="tweet"]', 15000);
 
-    // Scroll to load more tweets
     let loadedTweets = [];
-    while (loadedTweets.length < numberOfTweets) {
+    let retries = 0;
+    const maxRetries = 3;
+
+    while (loadedTweets.length < numberOfTweets && retries < maxRetries) {
       loadedTweets = await page.evaluate(() => {
         const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
         return tweets.map(tweet => {
@@ -112,8 +134,13 @@ async function getUserTweets(username, mode, numberOfTweets) {
 
           const getMetricCount = (text) => {
             if (!text) return 0;
-            const num = text.match(/\d+/);
-            return num ? parseInt(num[0]) : 0;
+            text = text.toLowerCase();
+            if (text.includes('k')) {
+              return Math.round(parseFloat(text) * 1000);
+            } else if (text.includes('m')) {
+              return Math.round(parseFloat(text) * 1000000);
+            }
+            return parseInt(text.replace(/,/g, '')) || 0;
           };
 
           const tweetText = getTextContent('[data-testid="tweetText"]');
@@ -139,7 +166,8 @@ async function getUserTweets(username, mode, numberOfTweets) {
 
       if (loadedTweets.length < numberOfTweets) {
         await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(2000);
+        retries++;
       }
     }
 
