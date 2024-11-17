@@ -9,14 +9,30 @@ if (!process.env.INSTAGRAM_USERNAME || !process.env.INSTAGRAM_PASSWORD) {
 
 async function initializeInstagram() {
   try {
+    // Generate device ID and set proxy if needed
     instagram.state.generateDevice(process.env.INSTAGRAM_USERNAME);
-    await instagram.account.login(process.env.INSTAGRAM_USERNAME, process.env.INSTAGRAM_PASSWORD);
-    logger.info('Instagram client initialized successfully');
+    
+    // Simulate pre-login flow
+    await instagram.simulate.preLoginFlow();
+    
+    // Attempt login
+    const loggedInUser = await instagram.account.login(
+      process.env.INSTAGRAM_USERNAME,
+      process.env.INSTAGRAM_PASSWORD
+    );
+    
+    // Simulate post-login flow
+    await instagram.simulate.postLoginFlow();
+    
+    logger.info('Instagram client initialized successfully', {
+      username: process.env.INSTAGRAM_USERNAME
+    });
+    
     return instagram;
   } catch (error) {
     logger.error('Failed to initialize Instagram client', {
       error: error.message,
-      stack: error.stack
+      type: error.name
     });
     throw error;
   }

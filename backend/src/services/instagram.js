@@ -3,13 +3,98 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const { instagram, initializeInstagram } = require('../config/instagram');
 
-async function getInstagramUserDetails(username) {
-  logger.info(`Fetching Instagram user details`, { username });
+let igClient = null;
+let lastInitTime = 0;
+const INIT_COOLDOWN = 300000; // 5 minutes cooldown between initialization attempts
+const MAX_RETRIES = 3;
+const INITIAL_DELAY = 1000;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function getInitializedClient(retryCount = 0) {
+  const now = Date.now();
+  if (!igClient || (now - lastInitTime) > INIT_COOLDOWN) {
+    try {
+      igClient = await initializeInstagram(retryCount);
+      lastInitTime = now;
+    } catch (error) {
+      if (retryCount < MAX_RETRIES) {
+        const delay = INITIAL_DELAY * Math.pow(2, retryCount);
+        logger.warn(`Instagram initialization failed, retrying in ${delay}ms`, {
+          retryCount,
+          delay,
+          error: error.message
+        });
+        await sleep(delay);
+        return getInitializedClient(retryCount + 1);
+      }
+      
+      logger.error('Instagram client initialization failed after retries', {
+        error: error.message,
+        type: error.name,
+        retryCount
+      });
+      throw new Error('Unable to connect to Instagram. Please try again later.');
+    }
+  }
+  return igClient;
+}
+
+async function handleInstagramError(error, context, username) {
+  if (error.name === 'IgCheckpointError') {
+    logger.error('Instagram security checkpoint triggered', {
+      context,
+      username,
+      error: error.message
+    });
+    throw new Error('Instagram security check required. Please try again later.');
+  }
+
+  if (error.name === 'IgLoginRequiredError') {
+    logger.error('Instagram login required', {
+      context,
+      username,
+      error: error.message
+    });
+    throw new Error('Instagram authentication failed. Please check credentials.');
+  }
+
+  if (error.name === 'IgResponseError') {
+    logger.error('Instagram API response error', {
+      context,
+      username,
+      error: error.message
+    });
+    throw new Error('Instagram service temporarily unavailable. Please try again later.');
+  }
+
+  logger.error('Instagram API error', {
+    context,
+    username,
+    error: error.message,
+    type: error.name
+  });
+  throw new Error('Failed to fetch Instagram data. Please try again later.');
+}
+
+async function getInstagramUserDetails(username, retryCount = 0) {
+  logger.info(`Fetching Instagram user details`, { username, retryCount });
   
   try {
-    await initializeInstagram();
-    const user = await instagram.user.searchExact(username);
-    const userInfo = await instagram.user.info(user.pk);
+    const client = await getInitializedClient();
+    
+    // Add random delay between requests
+    const randomDelay = Math.floor(Math.random() * 1000) + 500;
+    await sleep(randomDelay);
+    
+    const user = await client.user.searchExact(username);
+    
+    if (!user) {
+      logger.warn('Instagram user not found', { username });
+      throw new Error(`User ${username} not found on Instagram`);
+    }
+
+    const userInfo = await client.user.info(user.pk);
 
     logger.info(`Successfully retrieved Instagram user details`, {
       username,
@@ -29,12 +114,19 @@ async function getInstagramUserDetails(username) {
       image: userInfo.profile_pic_url
     };
   } catch (error) {
-    logger.error(`Failed to fetch Instagram user details`, {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    throw error;
+    if (retryCount < MAX_RETRIES && 
+        (error.name === 'IgActionSpamError' || error.name === 'IgResponseError')) {
+      const delay = INITIAL_DELAY * Math.pow(2, retryCount);
+      logger.warn(`Instagram request failed, retrying in ${delay}ms`, {
+        username,
+        retryCount,
+        delay,
+        error: error.message
+      });
+      await sleep(delay);
+      return getInstagramUserDetails(username, retryCount + 1);
+    }
+    await handleInstagramError(error, 'getInstagramUserDetails', username);
   }
 }
 
