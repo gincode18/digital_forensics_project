@@ -2,6 +2,8 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const logger = require('../config/logger');
 const twitterClient = require('../config/twitter');
+const forensicsAnalyzer = require('./forensics');
+const moment = require('moment');
 
 async function getTwitterUserDetails(username) {
   logger.info(`Fetching Twitter user details`, { username });
@@ -13,7 +15,10 @@ async function getTwitterUserDetails(username) {
         'description',
         'profile_image_url',
         'public_metrics',
-        'url'
+        'url',
+        'verified',
+        'location',
+        'entities'
       ]
     });
 
@@ -24,8 +29,7 @@ async function getTwitterUserDetails(username) {
 
     logger.info(`Successfully retrieved user details`, {
       username,
-      userId: user.data.id,
-      metrics: user.data.public_metrics
+      userId: user.data.id
     });
 
     return {
@@ -34,6 +38,8 @@ async function getTwitterUserDetails(username) {
       bio: user.data.description || '',
       joined: user.data.created_at,
       website: user.data.url || `https://twitter.com/${username}`,
+      verified: user.data.verified || false,
+      location: user.data.location || 'Not specified',
       stats: {
         tweets: user.data.public_metrics.tweet_count,
         following: user.data.public_metrics.following_count,
@@ -61,14 +67,16 @@ async function getUserTweets(username, mode, numberOfTweets) {
 
   try {
     const user = await twitterClient.v2.userByUsername(username);
-    logger.info(`Found user for tweets fetch`, {
-      username,
-      userId: user.data.id
-    });
-
     const tweets = await twitterClient.v2.userTimeline(user.data.id, {
       max_results: numberOfTweets,
-      'tweet.fields': ['created_at', 'public_metrics']
+      'tweet.fields': [
+        'created_at',
+        'public_metrics',
+        'entities',
+        'geo',
+        'context_annotations',
+        'referenced_tweets'
+      ]
     });
 
     logger.info(`Successfully retrieved tweets`, {
@@ -76,20 +84,23 @@ async function getUserTweets(username, mode, numberOfTweets) {
       tweetCount: tweets.data.data.length
     });
 
-    const formattedTweets = tweets.data.data.map(tweet => ({
+    return tweets.data.data.map(tweet => ({
+      id: tweet.id,
       twitter_link: `https://twitter.com/${username}/status/${tweet.id}`,
       text: tweet.text,
       date: tweet.created_at,
       likes: tweet.public_metrics.like_count,
-      comments: tweet.public_metrics.reply_count
+      comments: tweet.public_metrics.reply_count,
+      retweets: tweet.public_metrics.retweet_count,
+      quotes: tweet.public_metrics.quote_count,
+      entities: tweet.entities || {},
+      geo: tweet.geo,
+      context_annotations: tweet.context_annotations,
+      referenced_tweets: tweet.referenced_tweets
     }));
-
-    return formattedTweets;
   } catch (error) {
     logger.error(`Failed to fetch user tweets`, {
       username,
-      mode,
-      numberOfTweets,
       error: error.message,
       stack: error.stack
     });
@@ -97,41 +108,29 @@ async function getUserTweets(username, mode, numberOfTweets) {
   }
 }
 
-function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
-  logger.info(`Starting PDF generation`, {
+async function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
+  logger.info(`Starting forensic analysis and PDF generation`, {
     username: userDetails.username,
     numberOfTweets
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     try {
-      if (!userDetails || !tweets) {
-        logger.error(`Missing required data for PDF generation`, {
-          hasUserDetails: !!userDetails,
-          hasTweets: !!tweets
-        });
-        throw new Error('Missing required data for PDF generation');
-      }
-
-      const doc = new PDFDocument();
-      const filename = `${userDetails.name}_report.pdf`;
+      const forensicAnalysis = await forensicsAnalyzer.analyzeProfile(userDetails, tweets);
       
-      // Ensure the directory exists
+      const doc = new PDFDocument();
+      const filename = `${userDetails.username}_forensic_report.pdf`;
       const dir = 'public/pdf_files';
+      
       if (!fs.existsSync(dir)) {
-        logger.info(`Creating PDF directory: ${dir}`);
         fs.mkdirSync(dir, { recursive: true });
       }
       
       const outputPath = `${dir}/${filename}`;
-      logger.info(`Creating PDF at path: ${outputPath}`);
-      
       const writeStream = fs.createWriteStream(outputPath);
       
-      // Handle stream events
       writeStream.on('error', (error) => {
         logger.error(`Error writing PDF file`, {
-          filename,
           error: error.message,
           stack: error.stack
         });
@@ -139,51 +138,110 @@ function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
       });
 
       writeStream.on('finish', () => {
-        logger.info(`Successfully created PDF`, { filename });
+        logger.info(`Successfully created forensic report PDF`, { filename });
         resolve(filename);
       });
 
       doc.pipe(writeStream);
-      
-      // Add content to PDF
-      logger.debug(`Adding content to PDF`, { username: userDetails.username });
-      
-      doc.fontSize(25).text(`${userDetails.name} - Profile Overview`, { align: 'center' });
+
+      // Title and Basic Info
+      doc.fontSize(25).text('Social Media Forensics Report', { align: 'center' });
       doc.moveDown();
-      
-      // User details
+      doc.fontSize(12).text(`Generated on: ${moment().format('MMMM Do YYYY, h:mm:ss a')}`, { align: 'right' });
+      doc.moveDown();
+
+      // Profile Overview
+      doc.fontSize(20).text('1. Profile Overview');
+      doc.moveDown();
       doc.fontSize(12);
       doc.text(`Name: ${userDetails.name}`);
-      doc.text(`Username: ${userDetails.username}`);
-      doc.text(`Bio: ${userDetails.bio}`);
-      doc.text(`Joined: ${new Date(userDetails.joined).toLocaleDateString()}`);
-      doc.text(`Website: ${userDetails.website}`);
-      
-      // Stats
+      doc.text(`Username: @${userDetails.username}`);
+      doc.text(`Account Created: ${moment(userDetails.joined).format('MMMM Do YYYY')}`);
+      doc.text(`Account Age: ${moment().diff(moment(userDetails.joined), 'days')} days`);
+      doc.text(`Location: ${userDetails.location}`);
+      doc.text(`Verified: ${userDetails.verified ? 'Yes' : 'No'}`);
       doc.moveDown();
-      doc.fontSize(16).text('Statistics');
+
+      // Profile Metrics
+      doc.fontSize(20).text('2. Profile Metrics Analysis');
+      doc.moveDown();
       doc.fontSize(12);
-      Object.entries(userDetails.stats).forEach(([key, value]) => {
-        doc.text(`${key}: ${value}`);
-      });
-      
-      // Tweets
+      doc.text(`Followers/Following Ratio: ${forensicAnalysis.profileMetrics.followersToFollowing.toFixed(2)}`);
+      doc.text(`Average Tweets per Day: ${forensicAnalysis.profileMetrics.tweetsPerDay.toFixed(2)}`);
+      doc.text(`Engagement Rate: ${forensicAnalysis.profileMetrics.engagementRate}`);
       doc.moveDown();
-      doc.fontSize(16).text('Recent Tweets');
-      tweets.forEach((tweet, i) => {
-        doc.moveDown();
-        doc.fontSize(12);
-        doc.text(`Date: ${new Date(tweet.date).toLocaleDateString()}`);
-        doc.text(`Tweet: ${tweet.text}`);
-        doc.text(`Link: ${tweet.twitter_link}`);
-        doc.text(`Likes: ${tweet.likes} | Comments: ${tweet.comments}`);
-      });
+
+      // Content Analysis
+      doc.fontSize(20).text('3. Content Analysis');
+      doc.moveDown();
+      doc.fontSize(12);
+      doc.text(`Overall Sentiment: ${forensicAnalysis.contentAnalysis.overallSentiment.category} (${forensicAnalysis.contentAnalysis.overallSentiment.score.toFixed(2)})`);
       
-      logger.debug(`Finalizing PDF generation`);
+      doc.moveDown();
+      doc.text('Top Hashtags:');
+      forensicAnalysis.contentAnalysis.topHashtags.forEach(([tag, count]) => {
+        doc.text(`  ${tag}: ${count} times`);
+      });
+
+      doc.moveDown();
+      doc.text('Top Mentions:');
+      forensicAnalysis.contentAnalysis.topMentions.forEach(([mention, count]) => {
+        doc.text(`  ${mention}: ${count} times`);
+      });
+
+      // Behavioral Analysis
+      doc.addPage();
+      doc.fontSize(20).text('4. Behavioral Analysis');
+      doc.moveDown();
+      doc.fontSize(12);
+      
+      const pattern = forensicAnalysis.behavioralAnalysis.postingPattern;
+      doc.text(`Peak Activity Hour: ${pattern.peakHour}:00`);
+      doc.text(`Peak Activity Day: ${moment().day(pattern.peakDay).format('dddd')}`);
+      
+      // Add activity chart
+      doc.image(forensicAnalysis.behavioralAnalysis.activityChart, {
+        fit: [500, 300],
+        align: 'center'
+      });
+
+      // Risk Indicators
+      doc.addPage();
+      doc.fontSize(20).text('5. Risk Indicators');
+      doc.moveDown();
+      doc.fontSize(12);
+      
+      if (forensicAnalysis.riskIndicators.length === 0) {
+        doc.text('No significant risk indicators detected.');
+      } else {
+        forensicAnalysis.riskIndicators.forEach(indicator => {
+          doc.text(`Type: ${indicator.type}`);
+          doc.text(`Severity: ${indicator.severity}`);
+          doc.text(`Details: ${indicator.details}`);
+          doc.moveDown();
+        });
+      }
+
+      // Recent Activity Analysis
+      doc.addPage();
+      doc.fontSize(20).text('6. Recent Activity Analysis');
+      doc.moveDown();
+      
+      tweets.forEach((tweet, index) => {
+        const sentiment = forensicAnalysis.contentAnalysis.sentimentBreakdown[index];
+        doc.fontSize(12).text(`Tweet ${index + 1}:`);
+        doc.fontSize(10);
+        doc.text(`Date: ${moment(tweet.date).format('MMMM Do YYYY, h:mm:ss a')}`);
+        doc.text(`Content: ${tweet.text}`);
+        doc.text(`Sentiment: ${sentiment.sentiment.category} (${sentiment.sentiment.score.toFixed(2)})`);
+        doc.text(`Engagement: ${tweet.likes} likes, ${tweet.comments} comments`);
+        doc.moveDown();
+      });
+
       doc.end();
     } catch (error) {
-      logger.error(`Failed to create PDF`, {
-        username: userDetails?.username,
+      logger.error(`Failed to create forensic report`, {
+        username: userDetails.username,
         error: error.message,
         stack: error.stack
       });
