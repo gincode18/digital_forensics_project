@@ -101,7 +101,6 @@ async function getTwitterUserDetails(username) {
   }
 }
 
-// Rest of the twitter.js file remains the same
 async function getUserTweets(username, mode, numberOfTweets) {
   logger.info(`Fetching user tweets`, {
     username,
@@ -112,18 +111,24 @@ async function getUserTweets(username, mode, numberOfTweets) {
   let page;
   try {
     page = await twitterScraper.getNewPage();
+    
+    // Navigate to the profile with a longer timeout
     await page.goto(`https://twitter.com/${username}`, {
       waitUntil: ['networkidle0', 'domcontentloaded'],
-      timeout: 30000
+      timeout: 60000
     });
 
-    await twitterScraper.waitForSelector(page, 'article[data-testid="tweet"]', 15000);
+    // Wait for initial tweets to load
+    await twitterScraper.waitForSelector(page, 'article[data-testid="tweet"]', 30000);
 
     let loadedTweets = [];
-    let retries = 0;
-    const maxRetries = 3;
+    let previousTweetCount = 0;
+    let noNewTweetsCount = 0;
+    const maxNoNewTweetsAttempts = 5;
 
-    while (loadedTweets.length < numberOfTweets && retries < maxRetries) {
+    // Keep scrolling until we have enough tweets or determine we can't get more
+    while (loadedTweets.length < numberOfTweets && noNewTweetsCount < maxNoNewTweetsAttempts) {
+      // Extract current tweets
       loadedTweets = await page.evaluate(() => {
         const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
         return tweets.map(tweet => {
@@ -164,19 +169,50 @@ async function getUserTweets(username, mode, numberOfTweets) {
         });
       });
 
-      if (loadedTweets.length < numberOfTweets) {
-        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        await page.waitForTimeout(2000);
-        retries++;
+      // Check if we got new tweets
+      if (loadedTweets.length > previousTweetCount) {
+        previousTweetCount = loadedTweets.length;
+        noNewTweetsCount = 0; // Reset the counter as we found new tweets
+        
+        // Log progress
+        logger.info(`Found ${loadedTweets.length} tweets, target: ${numberOfTweets}`);
+      } else {
+        noNewTweetsCount++;
       }
+
+      // Scroll with a more sophisticated approach
+      await page.evaluate(async () => {
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        
+        // Scroll in smaller increments
+        const scrollHeight = document.body.scrollHeight;
+        const viewportHeight = window.innerHeight;
+        const scrollSteps = 3;
+        
+        for (let i = 0; i < scrollSteps; i++) {
+          window.scrollBy(0, (scrollHeight - viewportHeight) / scrollSteps);
+          await delay(500); // Wait between partial scrolls
+        }
+        
+        // Final scroll to bottom
+        window.scrollTo(0, document.body.scrollHeight);
+        await delay(1000); // Wait after final scroll
+      });
+
+      // Wait for potential new tweets to load
+      await page.waitForTimeout(2000);
     }
 
     logger.info(`Successfully retrieved tweets`, {
       username,
-      tweetCount: loadedTweets.length
+      tweetCount: loadedTweets.length,
+      requestedCount: numberOfTweets
     });
 
-    return loadedTweets.slice(0, numberOfTweets);
+    // Remove any duplicate tweets based on ID
+    const uniqueTweets = Array.from(new Map(loadedTweets.map(tweet => [tweet.id, tweet])).values());
+    
+    return uniqueTweets.slice(0, numberOfTweets);
 
   } catch (error) {
     logger.error(`Failed to fetch user tweets`, {

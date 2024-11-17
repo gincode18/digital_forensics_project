@@ -45,7 +45,7 @@ class TwitterScraper {
       const page = await browser.newPage();
       
       // Set a more realistic user agent
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
       
       // Set extra HTTP headers
       await page.setExtraHTTPHeaders({
@@ -55,20 +55,13 @@ class TwitterScraper {
         'Sec-Fetch-Mode': 'navigate'
       });
 
-      // Intercept requests
+      // Enable request interception
       await page.setRequestInterception(true);
       page.on('request', (request) => {
-        const blockedResourceTypes = ['image', 'font', 'stylesheet', 'media'];
-        const skippedResources = [
-          'googlesyndication',
-          'adservice',
-          'analytics',
-          'doubleclick'
-        ];
-
         if (
-          blockedResourceTypes.includes(request.resourceType()) ||
-          skippedResources.some(resource => request.url().includes(resource))
+          request.resourceType() === 'image' ||
+          request.resourceType() === 'stylesheet' ||
+          request.resourceType() === 'font'
         ) {
           request.abort();
         } else {
@@ -76,10 +69,8 @@ class TwitterScraper {
         }
       });
 
-      // Add error handling for navigation
-      page.on('error', err => {
-        logger.error('Page error:', err);
-      });
+      // Add waitForTimeout function to page
+      page.waitForTimeout = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
       return page;
     } catch (error) {
@@ -99,7 +90,7 @@ class TwitterScraper {
       });
       return true;
     } catch (error) {
-      logger.error(`Selector timeout: ${selector}`, {
+      logger.warn(`Selector timeout: ${selector}`, {
         error: error.message
       });
       return false;
@@ -109,9 +100,6 @@ class TwitterScraper {
   async closePage(page) {
     if (page) {
       try {
-        const session = await page.target().createCDPSession();
-        await session.send('Network.clearBrowserCookies');
-        await session.detach();
         await page.close();
       } catch (error) {
         logger.error('Failed to close page', {
