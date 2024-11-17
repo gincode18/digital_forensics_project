@@ -1,53 +1,72 @@
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const logger = require('../config/logger');
-const twitterClient = require('../config/twitter');
+const twitterScraper = require('../config/twitter');
 const forensicsAnalyzer = require('./forensics');
 const moment = require('moment');
 
 async function getTwitterUserDetails(username) {
   logger.info(`Fetching Twitter user details`, { username });
+  let page;
   
   try {
-    const user = await twitterClient.v2.userByUsername(username, {
-      'user.fields': [
-        'created_at',
-        'description',
-        'profile_image_url',
-        'public_metrics',
-        'url',
-        'verified',
-        'location',
-        'entities'
-      ]
+    page = await twitterScraper.getNewPage();
+    await page.goto(`https://twitter.com/${username}`, {
+      waitUntil: 'networkidle0',
+      timeout: 30000
     });
 
-    if (!user.data) {
-      logger.warn(`User not found`, { username });
-      throw new Error('User not found');
-    }
+    // Wait for key elements
+    await page.waitForSelector('div[data-testid="primaryColumn"]', { timeout: 5000 });
 
-    logger.info(`Successfully retrieved user details`, {
-      username,
-      userId: user.data.id
+    const userDetails = await page.evaluate(() => {
+      const getTextContent = (selector) => {
+        const element = document.querySelector(selector);
+        return element ? element.textContent.trim() : '';
+      };
+
+      const getFollowerCount = (text) => {
+        if (!text) return 0;
+        const num = text.replace(/,/g, '').match(/\d+/);
+        return num ? parseInt(num[0]) : 0;
+      };
+
+      const name = getTextContent('h2[data-testid="UserName"]');
+      const bio = getTextContent('div[data-testid="UserDescription"]');
+      const location = getTextContent('span[data-testid="UserLocation"]');
+      const website = getTextContent('a[data-testid="UserUrl"]');
+      
+      const followingText = getTextContent('a[href*="/following"] span');
+      const followersText = getTextContent('a[href*="/followers"] span');
+      
+      const joinDate = getTextContent('span[data-testid="UserJoinDate"]')
+        .replace('Joined ', '');
+
+      const verified = !!document.querySelector('svg[data-testid="icon-verified"]');
+      
+      // Get profile image URL
+      const imgElement = document.querySelector('img[alt*="Profile image"]');
+      const profileImage = imgElement ? imgElement.src : '';
+
+      return {
+        name,
+        username: window.location.pathname.slice(1),
+        bio,
+        joined: joinDate,
+        website: website || `https://twitter.com/${window.location.pathname.slice(1)}`,
+        verified,
+        location,
+        stats: {
+          following: getFollowerCount(followingText),
+          followers: getFollowerCount(followersText)
+        },
+        image: profileImage
+      };
     });
 
-    return {
-      name: user.data.name,
-      username: user.data.username,
-      bio: user.data.description || '',
-      joined: user.data.created_at,
-      website: user.data.url || `https://twitter.com/${username}`,
-      verified: user.data.verified || false,
-      location: user.data.location || 'Not specified',
-      stats: {
-        tweets: user.data.public_metrics.tweet_count,
-        following: user.data.public_metrics.following_count,
-        followers: user.data.public_metrics.followers_count,
-        likes: user.data.public_metrics.like_count
-      },
-      image: user.data.profile_image_url
-    };
+    logger.info(`Successfully retrieved user details`, { username });
+    return userDetails;
+
   } catch (error) {
     logger.error(`Failed to fetch Twitter user details`, {
       username,
@@ -55,6 +74,10 @@ async function getTwitterUserDetails(username) {
       stack: error.stack
     });
     throw error;
+  } finally {
+    if (page) {
+      await twitterScraper.closePage(page);
+    }
   }
 }
 
@@ -65,39 +88,68 @@ async function getUserTweets(username, mode, numberOfTweets) {
     numberOfTweets
   });
 
+  let page;
   try {
-    const user = await twitterClient.v2.userByUsername(username);
-    const tweets = await twitterClient.v2.userTimeline(user.data.id, {
-      max_results: numberOfTweets,
-      'tweet.fields': [
-        'created_at',
-        'public_metrics',
-        'entities',
-        'geo',
-        'context_annotations',
-        'referenced_tweets'
-      ]
+    page = await twitterScraper.getNewPage();
+    await page.goto(`https://twitter.com/${username}`, {
+      waitUntil: 'networkidle0',
+      timeout: 30000
     });
+
+    // Wait for tweets to load
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 5000 });
+
+    // Scroll to load more tweets
+    let loadedTweets = [];
+    while (loadedTweets.length < numberOfTweets) {
+      loadedTweets = await page.evaluate(() => {
+        const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+        return tweets.map(tweet => {
+          const getTextContent = (selector) => {
+            const element = tweet.querySelector(selector);
+            return element ? element.textContent.trim() : '';
+          };
+
+          const getMetricCount = (text) => {
+            if (!text) return 0;
+            const num = text.match(/\d+/);
+            return num ? parseInt(num[0]) : 0;
+          };
+
+          const tweetText = getTextContent('[data-testid="tweetText"]');
+          const timeElement = tweet.querySelector('time');
+          const tweetId = tweet.querySelector('a[href*="/status/"]')
+            ?.href?.match(/status\/(\d+)/)?.[1];
+
+          const likesText = getTextContent('[data-testid="like"] span');
+          const retweetsText = getTextContent('[data-testid="retweet"] span');
+          const repliesText = getTextContent('[data-testid="reply"] span');
+
+          return {
+            id: tweetId,
+            text: tweetText,
+            date: timeElement ? timeElement.getAttribute('datetime') : null,
+            likes: getMetricCount(likesText),
+            retweets: getMetricCount(retweetsText),
+            comments: getMetricCount(repliesText),
+            twitter_link: tweetId ? `https://twitter.com/${window.location.pathname.slice(1)}/status/${tweetId}` : ''
+          };
+        });
+      });
+
+      if (loadedTweets.length < numberOfTweets) {
+        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+        await page.waitForTimeout(1000);
+      }
+    }
 
     logger.info(`Successfully retrieved tweets`, {
       username,
-      tweetCount: tweets.data.data.length
+      tweetCount: loadedTweets.length
     });
 
-    return tweets.data.data.map(tweet => ({
-      id: tweet.id,
-      twitter_link: `https://twitter.com/${username}/status/${tweet.id}`,
-      text: tweet.text,
-      date: tweet.created_at,
-      likes: tweet.public_metrics.like_count,
-      comments: tweet.public_metrics.reply_count,
-      retweets: tweet.public_metrics.retweet_count,
-      quotes: tweet.public_metrics.quote_count,
-      entities: tweet.entities || {},
-      geo: tweet.geo,
-      context_annotations: tweet.context_annotations,
-      referenced_tweets: tweet.referenced_tweets
-    }));
+    return loadedTweets.slice(0, numberOfTweets);
+
   } catch (error) {
     logger.error(`Failed to fetch user tweets`, {
       username,
@@ -105,6 +157,10 @@ async function getUserTweets(username, mode, numberOfTweets) {
       stack: error.stack
     });
     throw error;
+  } finally {
+    if (page) {
+      await twitterScraper.closePage(page);
+    }
   }
 }
 
