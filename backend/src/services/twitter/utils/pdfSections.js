@@ -30,6 +30,7 @@ async function addTableOfContents(doc) {
     'Profile Overview',
     'Account Metrics Analysis',
     'Content Analysis',
+    'Sentiment Analysis',
     'Behavioral Patterns',
     'Risk Assessment',
     'Tweet Analysis',
@@ -250,6 +251,153 @@ function addPageNumbers(doc) {
   }
 }
 
+async function addSentimentAnalysis(doc, contentAnalysis) {
+  try {
+    // Validate input
+    if (!contentAnalysis || !Array.isArray(contentAnalysis.sentimentBreakdown)) {
+      logger.warn('Invalid content analysis data for sentiment analysis');
+      return;
+    }
+
+    doc.addPage();
+    // Add section header
+    doc.fontSize(14)
+       .fillColor('#2c3e50')
+       .text('Sentiment Distribution')
+       .moveDown();
+
+    // Create sentiment distribution table with safe defaults
+    const sentimentCounts = {
+      Positive: 0,
+      Neutral: 0,
+      Negative: 0
+    };
+
+    // Safely count sentiments
+    contentAnalysis.sentimentBreakdown.forEach(item => {
+      if (item && item.sentiment && item.sentiment.category) {
+        const sentiment = item.sentiment.category;
+        if (sentiment in sentimentCounts) {
+          sentimentCounts[sentiment]++;
+        }
+      }
+    });
+
+    const total = Object.values(sentimentCounts).reduce((a, b) => a + b, 0);
+    
+    if (total === 0) {
+      doc.fontSize(10)
+         .fillColor('#e74c3c')
+         .text('No sentiment data available')
+         .moveDown();
+      return;
+    }
+
+    // Create a table showing sentiment distribution
+    doc.fontSize(10);
+    
+    const sentimentColors = {
+      Positive: '#2ecc71',
+      Neutral: '#3498db',
+      Negative: '#e74c3c'
+    };
+
+    // Save initial Y position for positioning
+    const initialY = doc.y;
+
+    Object.entries(sentimentCounts).forEach(([sentiment, count], index) => {
+      const percentage = ((count / total) * 100).toFixed(1);
+      const yPosition = initialY + (index * 30); // Space each bar 30 points apart
+      
+      // Draw sentiment bar
+      const barWidth = Math.max(5, 300 * (count / total)); // Minimum width of 5
+      doc.rect(doc.x, yPosition, barWidth, 20)
+         .fill(sentimentColors[sentiment]);
+      
+      // Add label and count
+      doc.fillColor('#2c3e50')
+         .text(`${sentiment}: ${count} tweets (${percentage}%)`, 320, yPosition + 5);
+    });
+
+    // Move past the bars
+    doc.moveDown(6);
+
+    // Add average sentiment score
+    const avgScore = contentAnalysis.overallSentiment?.score ?? 0;
+    doc.fontSize(12)
+       .fillColor('#2c3e50')
+       .text(`Average Sentiment Score: ${avgScore.toFixed(2)}`)
+       .moveDown(2);
+
+    // Add sentiment over time if available
+    if (contentAnalysis.sentimentBreakdown.length > 0) {
+      doc.fontSize(14)
+         .text('Sentiment Trends')
+         .moveDown();
+
+      // Create a simple line representation of sentiment changes
+      const sentimentLine = contentAnalysis.sentimentBreakdown
+        .filter(item => item && item.sentiment && typeof item.sentiment.score === 'number')
+        .map(item => {
+          const score = item.sentiment.score;
+          return (score + 1) / 2; // Convert -1 to 1 range to 0 to 1
+        });
+
+      if (sentimentLine.length > 1) {
+        // Draw sentiment trend line
+        const lineWidth = 400;
+        const lineHeight = 100;
+        const pointCount = sentimentLine.length;
+        
+        doc.strokeColor('#34495e')
+           .lineWidth(1.5);
+        
+        // Draw axis
+        doc.moveTo(doc.x, doc.y)
+           .lineTo(doc.x, doc.y + lineHeight)
+           .stroke();
+        doc.moveTo(doc.x, doc.y + lineHeight)
+           .lineTo(doc.x + lineWidth, doc.y + lineHeight)
+           .stroke();
+
+        // Draw trend line
+        doc.strokeColor('#3498db')
+           .lineWidth(2);
+
+        for (let i = 0; i < pointCount - 1; i++) {
+          const x1 = doc.x + (i * (lineWidth / (pointCount - 1)));
+          const x2 = doc.x + ((i + 1) * (lineWidth / (pointCount - 1)));
+          const y1 = doc.y + (lineHeight - (sentimentLine[i] * lineHeight));
+          const y2 = doc.y + (lineHeight - (sentimentLine[i + 1] * lineHeight));
+          
+          doc.moveTo(x1, y1)
+             .lineTo(x2, y2)
+             .stroke();
+        }
+
+        // Add axis labels
+        doc.fontSize(8)
+           .fillColor('#666666')
+           .text('Positive', doc.x - 30, doc.y - 10)
+           .text('Negative', doc.x - 30, doc.y + lineHeight - 10)
+           .text('Time →', doc.x + lineWidth - 20, doc.y + lineHeight + 5);
+      }
+      doc.moveDown(8); // Move past the graph
+    }
+
+  } catch (error) {
+    logger.error('Error in sentiment analysis section', {
+      error: error.message,
+      stack: error.stack
+    });
+    // Add error message to document
+    doc.fontSize(10)
+       .fillColor('#e74c3c')
+       .text('Error generating sentiment analysis visualization')
+       .moveDown();
+  }
+}
+
 module.exports = {
   addCoverPage,
   addTableOfContents,
@@ -257,6 +405,7 @@ module.exports = {
   addProfileOverview,
   addMetricsAnalysis,
   addContentAnalysis,
+  addSentimentAnalysis,
   addTweetAnalysis,
   addRiskAssessment,
   addRecommendations,

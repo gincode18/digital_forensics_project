@@ -13,7 +13,8 @@ const {
   addTweetAnalysis,
   addRiskAssessment,
   addRecommendations,
-  addPageNumbers
+  addPageNumbers,
+  addSentimentAnalysis
 } = require('./utils/pdfSections');
 
 async function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
@@ -85,6 +86,7 @@ async function generatePdfReport(userDetails, tweets, forensicAnalysis) {
   await addProfileOverview(doc, userDetails);
   await addMetricsAnalysis(doc, userDetails, forensicAnalysis);
   await addContentAnalysis(doc, forensicAnalysis);
+  await addSentimentAnalysis(doc, forensicAnalysis.contentAnalysis); // Add new section
   await addTweetAnalysis(doc, tweets, forensicAnalysis);
   await addRiskAssessment(doc, forensicAnalysis);
   await addRecommendations(doc, forensicAnalysis);
