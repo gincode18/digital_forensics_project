@@ -25,6 +25,9 @@ async function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
   return new Promise(async (resolve, reject) => {
     try {
       const forensicAnalysis = await forensicsAnalyzer.analyzeProfile(userDetails, tweets);
+      // logger.info('---------Forensic analysis data:---------', {
+      //   analysisStructure: JSON.stringify(forensicAnalysis, null, 2)
+      // });
       const doc = await generatePdfReport(userDetails, tweets, forensicAnalysis);
       const filename = await savePdfReport(doc, userDetails.username);
       resolve(filename);
@@ -39,7 +42,36 @@ async function createTwitterUserPdf(userDetails, tweets, numberOfTweets) {
   });
 }
 
+// In reportService.js, add validation for forensicAnalysis
 async function generatePdfReport(userDetails, tweets, forensicAnalysis) {
+  // Validate forensicAnalysis structure
+  const defaultAnalysis = {
+    profileMetrics: {
+      engagementRate: 0
+    },
+    contentAnalysis: {
+      overallSentiment: {
+        category: 'Neutral',
+        score: 0
+      },
+      sentimentDistribution: {
+        positive: 0,
+        neutral: 0,
+        negative: 0
+      },
+      sentimentBreakdown: []
+    },
+    riskLevel: 'Low',
+    riskIndicators: [],
+    recommendations: []
+  };
+
+  // Merge with defaults
+  forensicAnalysis = {
+    ...defaultAnalysis,
+    ...forensicAnalysis
+  };
+
   const doc = new PDFDocument({
     size: 'A4',
     margins: { top: 50, bottom: 50, left: 50, right: 50 },

@@ -64,11 +64,18 @@ async function addExecutiveSummary(doc, userDetails, forensicAnalysis) {
      .text('. The analysis includes profile metrics, content patterns, behavioral insights, and risk assessment.')
      .moveDown();
 
+  // Safely parse the date
+  const accountAge = userDetails.joined ? 
+    moment(new Date(userDetails.joined)).isValid() ? 
+      moment().diff(moment(new Date(userDetails.joined)), 'days') : 
+      0 : 
+    0;
+
   const keyFindings = [
-    ['Account Age', `${moment().diff(moment(userDetails.joined), 'days')} days`],
-    ['Engagement Rate', `${forensicAnalysis.profileMetrics.engagementRate}%`],
-    ['Content Sentiment', forensicAnalysis.contentAnalysis.overallSentiment.category],
-    ['Risk Level', forensicAnalysis.riskLevel]
+    ['Account Age', `${accountAge} days`],
+    ['Engagement Rate', `${forensicAnalysis.profileMetrics?.engagementRate || 0}%`],
+    ['Content Sentiment', forensicAnalysis.contentAnalysis?.overallSentiment?.category || 'Neutral'],
+    ['Risk Level', forensicAnalysis.riskLevel || 'Low']
   ];
 
   createTable(doc, keyFindings);
@@ -127,22 +134,34 @@ async function addContentAnalysis(doc, forensicAnalysis) {
      .text('4. Content Analysis', { underline: true })
      .moveDown();
 
-  // Sentiment Distribution
+  // Sentiment Distribution with safe access
   doc.fontSize(14)
      .text('Sentiment Analysis')
      .moveDown();
 
+  const distribution = forensicAnalysis.contentAnalysis?.sentimentDistribution || {
+    positive: 0,
+    neutral: 0,
+    negative: 0
+  };
+
+  const sentiment = forensicAnalysis.contentAnalysis?.overallSentiment || {
+    category: 'Neutral',
+    score: 0
+  };
+
   const sentimentData = [
-    ['Overall Sentiment', forensicAnalysis.contentAnalysis.overallSentiment.category],
-    ['Sentiment Score', forensicAnalysis.contentAnalysis.overallSentiment.score.toFixed(2)],
-    ['Positive Content', `${forensicAnalysis.contentAnalysis.sentimentDistribution.positive}%`],
-    ['Neutral Content', `${forensicAnalysis.contentAnalysis.sentimentDistribution.neutral}%`],
-    ['Negative Content', `${forensicAnalysis.contentAnalysis.sentimentDistribution.negative}%`]
+    ['Overall Sentiment', sentiment.category],
+    ['Sentiment Score', sentiment.score.toFixed(2)],
+    ['Positive Content', `${distribution.positive}%`],
+    ['Neutral Content', `${distribution.neutral}%`],
+    ['Negative Content', `${distribution.negative}%`]
   ];
 
   createTable(doc, sentimentData);
 }
 
+// Modify addTweetAnalysis to handle missing data
 async function addTweetAnalysis(doc, tweets, forensicAnalysis) {
   doc.addPage();
   doc.fontSize(16)
@@ -151,7 +170,9 @@ async function addTweetAnalysis(doc, tweets, forensicAnalysis) {
      .moveDown();
 
   tweets.forEach((tweet, index) => {
-    const tweetAnalysis = forensicAnalysis.contentAnalysis.sentimentBreakdown[index];
+    const tweetAnalysis = forensicAnalysis.contentAnalysis?.sentimentBreakdown?.[index] || {
+      sentiment: { category: 'Neutral', score: 0 }
+    };
     
     doc.fontSize(11)
        .fillColor('#2c3e50')
@@ -160,7 +181,7 @@ async function addTweetAnalysis(doc, tweets, forensicAnalysis) {
 
     doc.fontSize(10)
        .fillColor('#34495e')
-       .text(tweet.text, {
+       .text(tweet.text || '', {
          width: 500,
          align: 'left',
          columns: 1
@@ -168,10 +189,10 @@ async function addTweetAnalysis(doc, tweets, forensicAnalysis) {
        .moveDown(0.5);
 
     const tweetMetrics = [
-      ['Posted', moment(tweet.date).format('MMM Do YYYY, h:mm a')],
-      ['Likes', tweet.likes.toLocaleString()],
-      ['Retweets', tweet.retweets.toLocaleString()],
-      ['Comments', tweet.comments.toLocaleString()],
+      ['Posted', moment(new Date(tweet.date)).format('MMM Do YYYY, h:mm a')],
+      ['Likes', (tweet.likes || 0).toLocaleString()],
+      ['Retweets', (tweet.retweets || 0).toLocaleString()],
+      ['Comments', (tweet.comments || 0).toLocaleString()],
       ['Sentiment', `${tweetAnalysis.sentiment.category} (${tweetAnalysis.sentiment.score.toFixed(2)})`]
     ];
 

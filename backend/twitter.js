@@ -1,8 +1,8 @@
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
-const logger = require('../config/logger');
-const twitterScraper = require('../config/twitter');
-const forensicsAnalyzer = require('./forensics');
+const logger = require('./src/config/logger');
+const twitterScraper = require('./src/config/twitter');
+const forensicsAnalyzer = require('./src/services/forensics');
 const moment = require('moment');
 const { createCanvas } = require('canvas');
 const { Chart } = require('chart.js');
