@@ -68,7 +68,7 @@ router.post('/generatereport', async (req, res) => {
     logger.info(`Successfully generated forensic report: ${pdfName}`);
     res.json({ 
       user_reports: pdfName,
-      download_url: `/public/pdf_files/${pdfName}`
+      download_url: `http://localhost:3000/public/pdf_files/${pdfName}`
     });
   } catch (error) {
     logger.error('Error generating report:', {
