@@ -2,16 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const logger = require('./config/logger');
 const config = require('./config/config');
-const {
-  getTwitterUserDetails,
-  getUserTweets,
-  createTwitterUserPdf
-} = require('./services/twitter');
-const {
-  getInstagramUserDetails,
-  getUserPosts,
-  createInstagramUserPdf
-} = require('./services/instagram');
+const twitterRoutes = require('./routes/twitter');
+const instagramRoutes = require('./routes/instagram');
+
 
 const app = express();
 
@@ -41,158 +34,9 @@ app.get('/', (req, res) => {
 });
 
 // Twitter endpoints
-app.get('/api/v1/twitter/userdetails/:username', async (req, res) => {
-  const { username } = req.params;
-  logger.info(`Fetching Twitter user details for username: ${username}`);
-  
-  try {
-    const userDetails = await getTwitterUserDetails(username);
-    logger.info(`Successfully retrieved Twitter details for user: ${username}`);
-    res.json({ userdetails: userDetails });
-  } catch (error) {
-    logger.error('Error fetching Twitter user details:', {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ error: 'Failed to fetch Twitter user details' });
-  }
-});
+app.use('/api/v1/twitter', twitterRoutes);
+app.use('/api/v1/instagram', instagramRoutes);
 
-app.post('/api/v1/twitter/usertweets', async (req, res) => {
-  const { username, number_of_tweets = 1 } = req.body;
-  logger.info(`Fetching tweets for user: ${username}`);
-
-  try {
-    const userTweets = await getUserTweets(username, "user", number_of_tweets);
-    logger.info(`Successfully retrieved tweets for user: ${username}`);
-    res.json({ usertweets: userTweets });
-  } catch (error) {
-    logger.error('Error fetching tweets:', {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ error: 'Failed to fetch tweets' });
-  }
-});
-
-app.post('/api/v1/twitter/generatereport', async (req, res) => {
-  const { username, number_of_tweets = 30 } = req.body;
-  logger.info(`Creating forensic report for user: ${username}`);
-  
-  try {
-    if (!username) {
-      logger.warn('Report generation attempted without username');
-      return res.status(400).json({ error: 'Username is required' });
-    }
-
-    logger.info(`Starting parallel fetch of Twitter user details and tweets for: ${username}`);
-    const [userDetails, tweets] = await Promise.all([
-      getTwitterUserDetails(username),
-      getUserTweets(username, "user", number_of_tweets)
-    ]);
-
-    logger.info(`Creating Twitter PDF report for user: ${username}`);
-    const pdfName = await createTwitterUserPdf(userDetails, tweets, number_of_tweets);
-
-    logger.info(`Successfully generated forensic report: ${pdfName}`);
-    res.json({ 
-      user_reports: pdfName,
-      download_url: `http://localhost:3000/public/pdf_files/${pdfName}`
-    });
-  } catch (error) {
-    logger.error('Error generating report:', {
-      username,
-      numberOfTweets: number_of_tweets,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ 
-      error: 'Failed to generate report',
-      details: error.message 
-    });
-  }
-});
-
-// Instagram endpoints
-app.get('/api/v1/instagram/userdetails/:username', async (req, res) => {
-  const { username } = req.params;
-  logger.info(`Fetching Instagram user details for username: ${username}`);
-  
-  try {
-    const userDetails = await getInstagramUserDetails(username);
-    logger.info(`Successfully retrieved Instagram details for user: ${username}`);
-    res.json({ userdetails: userDetails });
-  } catch (error) {
-    logger.error('Error fetching Instagram user details:', {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ error: 'Failed to fetch Instagram user details' });
-  }
-});
-
-app.post('/api/v1/instagram/userposts', async (req, res) => {
-  const { username, number_of_posts = 1 } = req.body;
-  logger.info(`Fetching Instagram posts for user: ${username}`);
-
-  try {
-    const userPosts = await getUserPosts(username, number_of_posts);
-    logger.info(`Successfully retrieved Instagram posts for user: ${username}`);
-    res.json({ userposts: userPosts });
-  } catch (error) {
-    logger.error('Error fetching Instagram posts:', {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ error: 'Failed to fetch Instagram posts' });
-  }
-});
-
-app.post('/api/v1/instagram/generatereport', async (req, res) => {
-  const { username, number_of_posts = 1 } = req.body;
-  logger.info(`Generating Instagram report for user: ${username}`);
-  
-  try {
-    if (!username) {
-      logger.warn('Report generation attempted without username');
-      return res.status(400).json({ error: 'Username is required' });
-    }
-
-    logger.info(`Starting parallel fetch of Instagram user details and posts for: ${username}`);
-    const [userDetails, posts] = await Promise.all([
-      getInstagramUserDetails(username),
-      getUserPosts(username, number_of_posts)
-    ]);
-
-    logger.info(`Creating Instagram PDF report for user: ${username}`);
-    const pdfName = await createInstagramUserPdf(
-      userDetails,
-      posts,
-      number_of_posts
-    );
-
-    logger.info(`Successfully generated Instagram report: ${pdfName}`);
-    res.json({ 
-      user_reports: pdfName,
-      download_url: `/public/pdf_files/${pdfName}`
-    });
-  } catch (error) {
-    logger.error('Error generating Instagram report:', {
-      username,
-      numberOfPosts: number_of_posts,
-      error: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ 
-      error: 'Failed to generate Instagram report',
-      details: error.message 
-    });
-  }
-});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
