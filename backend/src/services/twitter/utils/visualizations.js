@@ -1,18 +1,18 @@
+// Rest of the file remains unchanged
 const { createCanvas, loadImage } = require('canvas');
-// const d3 = require('d3');
 const d3Cloud = require('d3-cloud');
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
-
 const fs = require('fs');
 const logger = require('../../../config/logger');
-async function getD3() {
-  return await import('d3');
-}
 
 // Set canvas size for visualizations
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 
+// Dynamically load d3 for Network Graph
+async function getD3() {
+  return await import('d3');
+}
 
 async function generateWordCloud(tweets) {
   return new Promise((resolve, reject) => {
@@ -77,31 +77,64 @@ async function generateWordCloud(tweets) {
     }
   });
 }
-
-/**
- * Generate an Engagement Heatmap.
- * @param {Array} tweets - Array of tweet objects with a "createdAt" property.
- * @returns {Promise<Buffer>} - A buffer containing the Heatmap image.
- */
 async function generateEngagementHeatmap(tweets) {
   try {
     const canvas = new ChartJSNodeCanvas({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
 
-    const engagementByHour = Array.from({ length: 24 }, () => 0);
-    tweets.forEach(({ createdAt }) => {
-      const hour = new Date(createdAt).getHours();
-      engagementByHour[hour]++;
+    // Initialize engagement data matrix (7 days x 24 hours)
+    const engagementMatrix = Array(7).fill().map(() => Array(24).fill(0));
+
+    // Aggregate engagement data
+    tweets.forEach(tweet => {
+      const date = new Date(tweet.date);
+      const day = date.getDay(); // 0-6 (Sunday-Saturday)
+      const hour = date.getHours(); // 0-23
+      
+      // Calculate total engagement for this tweet
+      const engagement = tweet.likes + tweet.retweets + tweet.comments;
+      
+      // Add to matrix
+      engagementMatrix[day][hour] += engagement;
     });
 
+    // Prepare data for Chart.js
     const data = {
       labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
       datasets: [
         {
-          label: 'Engagement by Hour',
-          data: engagementByHour,
-          backgroundColor: 'rgba(75, 192, 192, 0.6)',
-          borderColor: 'rgba(75, 192, 192, 1)',
-          borderWidth: 1,
+          label: 'Sunday',
+          data: engagementMatrix[0],
+          backgroundColor: 'rgba(255, 99, 132, 0.5)',
+        },
+        {
+          label: 'Monday',
+          data: engagementMatrix[1],
+          backgroundColor: 'rgba(54, 162, 235, 0.5)',
+        },
+        {
+          label: 'Tuesday',
+          data: engagementMatrix[2],
+          backgroundColor: 'rgba(255, 206, 86, 0.5)',
+        },
+        {
+          label: 'Wednesday',
+          data: engagementMatrix[3],
+          backgroundColor: 'rgba(75, 192, 192, 0.5)',
+        },
+        {
+          label: 'Thursday',
+          data: engagementMatrix[4],
+          backgroundColor: 'rgba(153, 102, 255, 0.5)',
+        },
+        {
+          label: 'Friday',
+          data: engagementMatrix[5],
+          backgroundColor: 'rgba(255, 159, 64, 0.5)',
+        },
+        {
+          label: 'Saturday',
+          data: engagementMatrix[6],
+          backgroundColor: 'rgba(199, 199, 199, 0.5)',
         },
       ],
     };
@@ -110,28 +143,48 @@ async function generateEngagementHeatmap(tweets) {
       type: 'bar',
       data,
       options: {
+        responsive: true,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Engagement by Day and Hour',
+            font: {
+              size: 16,
+            },
+          },
+          legend: {
+            position: 'right',
+          },
+        },
         scales: {
-          x: { title: { display: true, text: 'Hour of Day' } },
-          y: { title: { display: true, text: 'Number of Tweets' } },
+          x: {
+            title: {
+              display: true,
+              text: 'Hour of Day',
+            },
+            stacked: true,
+          },
+          y: {
+            title: {
+              display: true,
+              text: 'Total Engagement',
+            },
+            stacked: true,
+          },
         },
       },
     };
 
-    return canvas.renderToBuffer(config);
+    return await canvas.renderToBuffer(config);
   } catch (error) {
     logger.error('Error generating Engagement Heatmap', { error: error.message });
     throw error;
   }
 }
 
-/**
- * Generate a Network Graph of user interactions.
- * @param {Array} tweets - Array of tweet objects with "author" and "mentions".
- * @param {Object} userDetails - The main user's details.
- * @returns {Promise<Buffer>} - A buffer containing the Network Graph image.
- */
+
 async function generateNetworkGraph(tweets, userDetails) {
-  return new Promise( async (resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     try {
       const d3 = await getD3(); // Dynamically load d3
       const canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -141,6 +194,7 @@ async function generateNetworkGraph(tweets, userDetails) {
       const nodes = new Map();
       const links = [];
 
+      // Add the main user as a central node
       nodes.set(userDetails.username, { id: userDetails.username, group: 1 });
 
       tweets.forEach(({ author, mentions = [] }) => {
@@ -172,9 +226,10 @@ async function generateNetworkGraph(tweets, userDetails) {
       // Run simulation for fixed iterations
       for (let i = 0; i < 150; i++) simulation.tick();
 
-      // Draw graph
+      // Draw the graph
       context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+      // Draw links (connections between nodes)
       context.strokeStyle = '#cccccc';
       links.forEach((link) => {
         const source = nodeArray.find((n) => n.id === link.source);
@@ -187,12 +242,19 @@ async function generateNetworkGraph(tweets, userDetails) {
         }
       });
 
+      // Draw nodes with labels
       nodeArray.forEach((node) => {
         context.beginPath();
         context.arc(node.x, node.y, 5, 0, 2 * Math.PI, false);
         context.fillStyle = node.group === 1 ? '#3498db' : node.group === 2 ? '#e74c3c' : '#2ecc71';
         context.fill();
         context.stroke();
+
+        // Add labels (usernames or node IDs)
+        context.font = '12px Arial';
+        context.fillStyle = '#000';
+        context.textAlign = 'center';
+        context.fillText(node.id, node.x, node.y - 10);
       });
 
       resolve(canvas.toBuffer('image/png'));
