@@ -1,6 +1,7 @@
 const moment = require('moment');
 const { createTable, generateCharts } = require('./pdfHelpers');
 const { getRiskColor } = require('./riskAnalysis');
+const logger = require('../../../config/logger');
 
 async function addCoverPage(doc, userDetails) {
   doc.fontSize(24)
