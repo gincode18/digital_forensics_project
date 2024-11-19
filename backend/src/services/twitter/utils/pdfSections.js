@@ -1,5 +1,5 @@
 const moment = require('moment');
-const { createTable, generateCharts } = require('./pdfHelpers');
+const { createTable, generateCharts, extractHashtags } = require('./pdfHelpers');
 const { getRiskColor } = require('./riskAnalysis');
 const logger = require('../../../config/logger');
 
@@ -399,6 +399,199 @@ async function addSentimentAnalysis(doc, contentAnalysis) {
   }
 }
 
+async function addTrendingTopics(doc, tweets) {
+  doc.addPage();
+  doc.fontSize(16)
+     .fillColor('#2c3e50')
+     .text('Trending Topics', { underline: true })
+     .moveDown();
+
+  // Extract hashtags from tweets
+  const allHashtags = tweets.flatMap(tweet => extractHashtags(tweet.text));
+  const hashtagCounts = allHashtags.reduce((acc, tag) => {
+    acc[tag] = (acc[tag] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Sort hashtags by frequency
+  const topHashtags = Object.entries(hashtagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  if (topHashtags.length === 0) {
+    doc.fontSize(10)
+       .fillColor('#7f8c8d')
+       .text('No significant hashtags found in recent tweets.')
+       .moveDown();
+    return;
+  }
+
+  // Create a bar chart of top hashtags
+  const hashtagData = {
+    labels: topHashtags.map(([tag]) => tag),
+    datasets: [{
+      data: topHashtags.map(([, count]) => count),
+      backgroundColor: '#3498db'
+    }]
+  };
+
+  const chartBuffer = await generateCharts(hashtagData, 'bar', {
+    scales: { y: { beginAtZero: true } }
+  });
+
+  doc.image(chartBuffer, { fit: [500, 300], align: 'center' });
+  doc.moveDown();
+
+  // Detailed hashtag table
+  const hashtagTable = topHashtags.map(([tag, count]) => [
+    tag, 
+    count, 
+    `${((count / tweets.length) * 100).toFixed(1)}%`
+  ]);
+
+  createTable(doc, [
+    ['Hashtag', 'Frequency', 'Percentage'],
+    ...hashtagTable
+  ]);
+}
+
+// Enhanced Engagement Metrics Over Time
+async function addEngagementMetricsOverTime(doc, tweets) {
+  doc.addPage();
+  doc.fontSize(16)
+     .fillColor('#2c3e50')
+     .text('Engagement Metrics Over Time', { underline: true })
+     .moveDown();
+
+  // Sort tweets by date
+  const sortedTweets = tweets.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Prepare data for engagement metrics
+  const engagementData = {
+    labels: sortedTweets.map(tweet => moment(tweet.date).format('MMM DD')),
+    datasets: [
+      {
+        label: 'Likes',
+        data: sortedTweets.map(tweet => tweet.likes || 0),
+        borderColor: '#2ecc71',
+        fill: false
+      },
+      {
+        label: 'Retweets',
+        data: sortedTweets.map(tweet => tweet.retweets || 0),
+        borderColor: '#3498db',
+        fill: false
+      },
+      {
+        label: 'Comments',
+        data: sortedTweets.map(tweet => tweet.comments || 0),
+        borderColor: '#e74c3c',
+        fill: false
+      }
+    ]
+  };
+
+  const chartBuffer = await generateCharts(engagementData, 'line', {
+    scales: { 
+      y: { 
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Engagement Count'
+        }
+      }
+    }
+  });
+
+  doc.image(chartBuffer, { fit: [500, 300], align: 'center' });
+  doc.moveDown();
+
+  // Engagement Summary
+  const engagementSummary = [
+    ['Metric', 'Total', 'Average per Tweet'],
+    [
+      'Likes', 
+      sortedTweets.reduce((sum, tweet) => sum + (tweet.likes || 0), 0),
+      (sortedTweets.reduce((sum, tweet) => sum + (tweet.likes || 0), 0) / sortedTweets.length).toFixed(1)
+    ],
+    [
+      'Retweets', 
+      sortedTweets.reduce((sum, tweet) => sum + (tweet.retweets || 0), 0),
+      (sortedTweets.reduce((sum, tweet) => sum + (tweet.retweets || 0), 0) / sortedTweets.length).toFixed(1)
+    ],
+    [
+      'Comments', 
+      sortedTweets.reduce((sum, tweet) => sum + (tweet.comments || 0), 0),
+      (sortedTweets.reduce((sum, tweet) => sum + (tweet.comments || 0), 0) / sortedTweets.length).toFixed(1)
+    ]
+  ];
+
+  createTable(doc, engagementSummary);
+}
+
+// Enhanced Recommendations
+async function addEnhancedRecommendations(doc, forensicAnalysis, userDetails, tweets) {
+  doc.addPage();
+  doc.fontSize(16)
+     .fillColor('#2c3e50')
+     .text('Enhanced Recommendations', { underline: true })
+     .moveDown();
+
+  const recommendations = {
+    'Content Strategy': [],
+    'Engagement Strategy': [],
+    'Risk Mitigation': []
+  };
+
+  // Content Strategy Recommendations
+  if (forensicAnalysis.contentAnalysis) {
+    const sentiment = forensicAnalysis.contentAnalysis.overallSentiment;
+    if (sentiment.category === 'Positive') {
+      recommendations['Content Strategy'].push(
+        'Continue creating content with positive messaging and tone.'
+      );
+    } else if (sentiment.category === 'Negative') {
+      recommendations['Content Strategy'].push(
+        'Focus on developing more constructive and positive content.'
+      );
+    }
+  }
+
+  // Engagement Strategy Recommendations
+  const avgLikes = tweets.reduce((sum, tweet) => sum + (tweet.likes || 0), 0) / tweets.length;
+  const avgRetweets = tweets.reduce((sum, tweet) => sum + (tweet.retweets || 0), 0) / tweets.length;
+
+  recommendations['Engagement Strategy'].push(
+    `Aim to maintain an average of ${avgLikes.toFixed(0)} likes and ${avgRetweets.toFixed(0)} retweets per tweet.`,
+    'Engage with followers through comments and direct interactions.',
+    'Post consistently to maintain audience interest.'
+  );
+
+  // Risk Mitigation Recommendations
+  if (forensicAnalysis.riskLevel === 'High') {
+    recommendations['Risk Mitigation'].push(
+      'Review and moderate content to reduce potential controversial statements.',
+      'Be mindful of the potential impact of tweets on public perception.'
+    );
+  }
+
+  // Print recommendations in a structured format
+  Object.entries(recommendations).forEach(([category, recs]) => {
+    doc.fontSize(14)
+       .fillColor('#2c3e50')
+       .text(category, { underline: true })
+       .moveDown(0.5);
+
+    recs.forEach(rec => {
+      doc.fontSize(12)
+         .fillColor('#333333')
+         .text(`• ${rec}`)
+         .moveDown(0.5);
+    });
+    doc.moveDown();
+  });
+}
+
 module.exports = {
   addCoverPage,
   addTableOfContents,
@@ -409,6 +602,9 @@ module.exports = {
   addSentimentAnalysis,
   addTweetAnalysis,
   addRiskAssessment,
-  addRecommendations,
-  addPageNumbers
+  addTrendingTopics,
+  addEngagementMetricsOverTime,
+  addEnhancedRecommendations,
+  addPageNumbers,
+  addRecommendations
 };
