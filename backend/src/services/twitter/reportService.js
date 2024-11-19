@@ -93,7 +93,7 @@ async function generatePdfReport(userDetails, tweets, forensicAnalysis) {
   await addTweetAnalysis(doc, tweets, forensicAnalysis);
   await addTrendingTopics(doc, tweets);
   await addEngagementMetricsOverTime(doc, tweets);
-  await addRiskAssessment(doc, forensicAnalysis);
+  await addRiskAssessment(doc,userDetails,tweets);
   await addEnhancedRecommendations(doc, forensicAnalysis, userDetails, tweets);
 
   // Add page numbers

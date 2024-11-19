@@ -203,27 +203,93 @@ async function addTweetAnalysis(doc, tweets, forensicAnalysis) {
   });
 }
 
-async function addRiskAssessment(doc, forensicAnalysis) {
+async function addRiskAssessment(doc, userDetails, tweets) {
   doc.addPage();
+
   doc.fontSize(16)
      .fillColor('#2c3e50')
      .text('6. Risk Assessment', { underline: true })
      .moveDown();
 
-  if (forensicAnalysis.riskIndicators.length === 0) {
-    doc.text('No significant risk indicators detected.');
-  } else {
-    forensicAnalysis.riskIndicators.forEach(indicator => {
+  // Check if there are any tweets
+  if (!tweets || tweets.length === 0) {
+    doc.fontSize(12)
+       .fillColor('#333333')
+       .text('No tweets available for risk assessment.', { align: 'center' })
+       .moveDown();
+    return;
+  }
+
+  // Calculate metrics for risk assessment
+  const timestamps = tweets.map(tweet => new Date(tweet.date).getTime());
+  timestamps.sort((a, b) => a - b); // Sort timestamps
+
+  let rapidPostingRisk = false;
+  if (timestamps.length > 1) {
+    // Calculate time differences between consecutive tweets
+    const timeDiffs = timestamps.map((time, i) => {
+      if (i === 0) return null;
+      return (time - timestamps[i - 1]) / 60000; // Time difference in minutes
+    }).filter(diff => diff !== null);
+
+    const averageTimeBetweenPosts = timeDiffs.reduce((a, b) => a + b, 0) / timeDiffs.length;
+
+    // Assess rapid posting risk
+    rapidPostingRisk = averageTimeBetweenPosts < 10;
+
+    // Add Rapid Posting Risk Indicator
+    if (rapidPostingRisk) {
       doc.fontSize(12)
-         .fillColor(getRiskColor(indicator.severity))
-         .text(`${indicator.type} (${indicator.severity})`, { underline: true })
+         .fillColor('#e74c3c') // High-risk color
+         .text(`Rapid Posting (High)`, { underline: true })
          .fillColor('#333333')
          .fontSize(10)
-         .text(indicator.details)
+         .text(`Average time between posts is ${averageTimeBetweenPosts.toFixed(2)} minutes, indicating potential spam-like behavior.`)
          .moveDown();
-    });
+    } else {
+      doc.fontSize(12)
+         .fillColor('#2ecc71') // Low-risk color
+         .text(`Posting Frequency (Low Risk)`, { underline: true })
+         .fillColor('#333333')
+         .fontSize(10)
+         .text(`Average time between posts is ${averageTimeBetweenPosts.toFixed(2)} minutes, indicating normal posting behavior.`)
+         .moveDown();
+    }
   }
+
+  // Other Risk Assessments (Content-Based)
+  const flaggedWords = ['fraud', 'waste', 'cocaine', 'critics']; 
+  const flaggedTweets = tweets.filter(tweet =>
+    flaggedWords.some(word => tweet.text.toLowerCase().includes(word.toLowerCase()))
+  );
+
+  if (flaggedTweets.length > 0) {
+    doc.fontSize(12)
+       .fillColor('#e67e22') // Medium-risk color
+       .text(`Content Risks (Medium)`, { underline: true })
+       .fillColor('#333333')
+       .fontSize(10)
+       .text(`${flaggedTweets.length} tweets contain potentially risky content, such as controversial or negative terms.`)
+       .moveDown();
+  } else {
+    doc.fontSize(12)
+       .fillColor('#2ecc71') // Low-risk color
+       .text(`Content Risks (Low)`, { underline: true })
+       .fillColor('#333333')
+       .fontSize(10)
+       .text(`No tweets contain flagged terms or potentially risky content.`)
+       .moveDown();
+  }
+
+  // Final Risk Summary
+  const overallRisk = rapidPostingRisk ? 'High' : flaggedTweets.length > 0 ? 'Medium' : 'Low';
+
+  doc.fontSize(12)
+     .fillColor('#34495e')
+     .text(`Overall Risk Level: ${overallRisk}`, { align: 'center' })
+     .moveDown();
 }
+
 
 async function addRecommendations(doc, forensicAnalysis) {
   doc.addPage();
@@ -251,6 +317,7 @@ function addPageNumbers(doc) {
              { align: 'center' });
   }
 }
+
 
 async function addSentimentAnalysis(doc, contentAnalysis) {
   try {
@@ -398,6 +465,8 @@ async function addSentimentAnalysis(doc, contentAnalysis) {
        .moveDown();
   }
 }
+
+
 
 async function addTrendingTopics(doc, tweets) {
   doc.addPage();
