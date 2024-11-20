@@ -374,7 +374,8 @@ async function addSentimentAnalysis(doc, contentAnalysis) {
     const initialY = doc.y;
 
     Object.entries(sentimentCounts).forEach(([sentiment, count], index) => {
-      const percentage = ((count / total) * 100).toFixed(1);
+  const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+
       const yPosition = initialY + (index * 30); // Space each bar 30 points apart
       
       // Draw sentiment bar
