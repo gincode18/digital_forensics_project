@@ -111,7 +111,7 @@ curl -X POST "http://localhost:3000/api/v1/twitter/generatereport" \
 ```json  
 {  
   "user_reports": "elonmusk_forensic_report.pdf",  
-  "download_url": "/public/pdf_files/elonmusk_forensic_report.pdf"  
+  "download_url": "http://localhost:3000/public/pdf_files/elonmusk_forensic_report.pdf"  
 }  
 ```  
 
