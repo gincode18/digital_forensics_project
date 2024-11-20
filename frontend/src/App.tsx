@@ -13,8 +13,42 @@ import {
 } from "./components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Label } from "./components/ui/label";
-import { AlertCircle, Download, Loader2, Search, User } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  Loader2,
+  Search,
+  User,
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
+import UserTweetsView from "./components/user-tweets";
+import UserDetailsView from "./components/user-details";
+
+interface UserDetails {
+  name: string
+  username: string
+  bio: string
+  joined: string
+  website: string
+  verified: boolean
+  location: string
+  stats: {
+    following: number
+    followers: number
+  }
+  followers: Array<{
+    username: string
+    displayName: string
+    bio: string
+    verified: boolean
+  }>
+  following: Array<{
+    username: string
+    displayName: string
+    bio: string
+    verified: boolean
+  }>
+}
 
 export default function Dashboard() {
   const [username, setUsername] = useState(() => {
@@ -27,7 +61,7 @@ export default function Dashboard() {
     return saved || "10";
   });
 
-  const [userDetails, setUserDetails] = useState(() => {
+  const [userDetails, setUserDetails] = useState<UserDetails | null>(() => {
     const saved = localStorage.getItem("userDetails");
     return saved ? JSON.parse(saved) : null;
   });
@@ -41,7 +75,7 @@ export default function Dashboard() {
     const saved = localStorage.getItem("report");
     return saved ? JSON.parse(saved) : null;
   });
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState({
     userDetails: false,
     userTweets: false,
@@ -78,8 +112,8 @@ export default function Dashboard() {
       const data = await response.json();
       setUserDetails(data.userdetails);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setLoading((prev) => ({ ...prev, userDetails: false }));
     }
@@ -103,8 +137,8 @@ export default function Dashboard() {
       const data = await response.json();
       setUserTweets(data.usertweets);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setLoading((prev) => ({ ...prev, userTweets: false }));
     }
@@ -128,8 +162,8 @@ export default function Dashboard() {
       const data = await response.json();
       setReport(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setLoading((prev) => ({ ...prev, report: false }));
     }
@@ -264,9 +298,7 @@ export default function Dashboard() {
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                   </div>
                 ) : userDetails ? (
-                  <pre className="bg-gray-100 p-4 rounded-md overflow-auto max-h-96">
-                    {JSON.stringify(userDetails, null, 2)}
-                  </pre>
+                  <UserDetailsView details={userDetails} />
                 ) : (
                   <p className="text-gray-600">
                     No user details available. Fetch user details first.
@@ -286,9 +318,7 @@ export default function Dashboard() {
                     <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
                   </div>
                 ) : userTweets ? (
-                  <pre className="bg-gray-100 p-4 rounded-md overflow-auto max-h-96">
-                    {JSON.stringify(userTweets, null, 2)}
-                  </pre>
+                  <UserTweetsView tweets={userTweets} username={username} />
                 ) : (
                   <p className="text-gray-600">
                     No tweets available. Fetch user tweets first.
