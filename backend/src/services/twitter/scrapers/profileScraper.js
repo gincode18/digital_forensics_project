@@ -5,7 +5,7 @@ class ProfileScraper {
     this.page = page;
   }
 
-  async scrapeFollowers(username, limit = 100) {
+  async scrapeFollowers(username, limit = 5) {
     logger.info(`Starting followers scraping`, { username, limit });
     try {
       await this.page.goto(`https://twitter.com/${username}/followers`, {
@@ -14,48 +14,22 @@ class ProfileScraper {
       });
 
       logger.info(`Waiting for follower cells to load`, { username });
-      
-      // Wait for either the user cells or the empty state
+
+      // Wait for the follower cells to load or an empty state
       await Promise.race([
-        this.page.waitForSelector('[data-testid="cellInnerDiv"]', { timeout: 30000 }),
+        this.page.waitForSelector('[data-testid="UserCell"]', { timeout: 30000 }),
         this.page.waitForSelector('[data-testid="emptyState"]', { timeout: 30000 })
       ]);
 
-      // Check if we hit the empty state
+      // Check for empty state
       const emptyState = await this.page.$('[data-testid="emptyState"]');
       if (emptyState) {
         logger.info(`No followers found`, { username });
         return [];
       }
 
-      // Wait for a brief moment to let more cells load
-      await this.page.waitForTimeout(2000);
-
-      const followers = await this.page.evaluate((maxFollowers) => {
-        const followers = [];
-        const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
-
-        for (let i = 0; i < Math.min(cells.length, maxFollowers); i++) {
-          const cell = cells[i];
-          
-          // More specific selectors for user information
-          const userNameElement = cell.querySelector('[data-testid="User-Name"]');
-          const displayNameElement = userNameElement?.querySelector('div[dir="ltr"] span');
-          const usernameElement = userNameElement?.querySelector('div[dir="ltr"]:last-child span');
-          
-          if (userNameElement) {
-            followers.push({
-              username: usernameElement?.textContent?.replace('@', '')?.trim(),
-              displayName: displayNameElement?.textContent?.trim(),
-              verified: !!cell.querySelector('[data-testid="UserVerifiedBadge"]'),
-              bio: cell.querySelector('[data-testid="UserDescription"]')?.textContent?.trim(),
-              location: cell.querySelector('[data-testid="UserLocation"]')?.textContent?.trim()
-            });
-          }
-        }
-
-        return followers.filter(f => f.username);
-      }, limit);
+      // Scroll and collect follower data
+      const followers = await this.collectFollowerData(limit);
 
       logger.info(`Successfully scraped followers`, {
         username,
@@ -74,6 +48,56 @@ class ProfileScraper {
     }
   }
 
+  async collectFollowerData(limit) {
+    const followerData = new Set();
+    let previousHeight = 0;
+
+    while (followerData.size < limit) {
+      // Extract data from currently loaded cells
+      const newFollowers = await this.page.evaluate(() => {
+        const followers = [];
+        const cells = document.querySelectorAll('[data-testid="UserCell"]');
+
+        cells.forEach((cell) => {
+          const displayNameElement = cell.querySelector('div[dir="ltr"] span:first-child');
+          const usernameElement = cell.querySelector('div[dir="ltr"] span span');
+          const bioElement = cell.querySelector('div[dir="auto"]');
+          const verifiedBadge = cell.querySelector('[data-testid="UserVerifiedBadge"]');
+
+          const displayName = displayNameElement?.textContent?.trim();
+          const username = usernameElement?.textContent?.replace('@', '').trim();
+          const bio = bioElement?.textContent?.trim();
+
+          if (username && displayName) {
+            followers.push({
+              username,
+              displayName,
+              bio: bio || null, // Include bio if available
+              verified: !!verifiedBadge
+            });
+          }
+        });
+
+        return followers;
+      });
+
+      // Add new followers to the set (to remove duplicates)
+      newFollowers.forEach((user) => followerData.add(JSON.stringify(user)));
+
+      // Scroll to load more data
+      const currentHeight = await this.page.evaluate(() => document.body.scrollHeight);
+      if (currentHeight === previousHeight) break; // Stop if no new content loads
+
+      previousHeight = currentHeight;
+      await this.page.evaluate(() => window.scrollBy(0, window.innerHeight));
+      await this.page.waitForTimeout(1000); // Delay to allow content to load
+    }
+
+    // Convert Set to array and limit the results
+    return Array.from(followerData).map((user) => JSON.parse(user)).slice(0, limit);
+  }
+
+
   async scrapeFollowing(username, limit = 100) {
     logger.info(`Starting following scraping`, { username, limit });
     try {
@@ -83,48 +107,21 @@ class ProfileScraper {
       });
 
       logger.info(`Waiting for following cells to load`, { username });
-      
-      // Wait for either the user cells or the empty state
+
+      // Wait for the following list or an empty state
       await Promise.race([
         this.page.waitForSelector('[data-testid="cellInnerDiv"]', { timeout: 30000 }),
         this.page.waitForSelector('[data-testid="emptyState"]', { timeout: 30000 })
       ]);
 
-      // Check if we hit the empty state
       const emptyState = await this.page.$('[data-testid="emptyState"]');
       if (emptyState) {
         logger.info(`No following found`, { username });
         return [];
       }
 
-      // Wait for a brief moment to let more cells load
-      await this.page.waitForTimeout(2000);
-
-      const following = await this.page.evaluate((maxFollowing) => {
-        const following = [];
-        const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
-
-        for (let i = 0; i < Math.min(cells.length, maxFollowing); i++) {
-          const cell = cells[i];
-          
-          // More specific selectors for user information
-          const userNameElement = cell.querySelector('[data-testid="User-Name"]');
-          const displayNameElement = userNameElement?.querySelector('div[dir="ltr"] span');
-          const usernameElement = userNameElement?.querySelector('div[dir="ltr"]:last-child span');
-          
-          if (userNameElement) {
-            following.push({
-              username: usernameElement?.textContent?.replace('@', '')?.trim(),
-              displayName: displayNameElement?.textContent?.trim(),
-              verified: !!cell.querySelector('[data-testid="UserVerifiedBadge"]'),
-              bio: cell.querySelector('[data-testid="UserDescription"]')?.textContent?.trim(),
-              location: cell.querySelector('[data-testid="UserLocation"]')?.textContent?.trim()
-            });
-          }
-        }
-
-        return following.filter(f => f.username);
-      }, limit);
+      // Scroll and collect following
+      const following = await this.collectUserData(limit);
 
       logger.info(`Successfully scraped following`, {
         username,
@@ -141,6 +138,51 @@ class ProfileScraper {
       });
       return [];
     }
+  }
+
+  async collectUserData(limit) {
+    const userData = new Set();
+    let previousHeight = 0;
+
+    while (userData.size < limit) {
+      // Extract data from currently loaded cells
+      const newUsers = await this.page.evaluate(() => {
+        const users = [];
+        const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
+
+        cells.forEach((cell) => {
+          const usernameElement = cell.querySelector('[dir="ltr"] > span');
+          const displayNameElement = cell.querySelector('[dir="ltr"]:first-child span');
+          const verifiedBadge = cell.querySelector('[data-testid="UserVerifiedBadge"]');
+          const username = usernameElement?.textContent?.replace('@', '').trim();
+          const displayName = displayNameElement?.textContent?.trim();
+
+          if (username && displayName) {
+            users.push({
+              username,
+              displayName,
+              verified: !!verifiedBadge
+            });
+          }
+        });
+
+        return users;
+      });
+
+      // Add new users to the set (to ensure uniqueness)
+      newUsers.forEach((user) => userData.add(JSON.stringify(user)));
+
+      // Scroll down
+      const currentHeight = await this.page.evaluate(() => document.body.scrollHeight);
+      if (currentHeight === previousHeight) break; // Stop if we can't scroll further
+
+      previousHeight = currentHeight;
+      await this.page.evaluate(() => window.scrollBy(0, window.innerHeight));
+      await this.page.waitForTimeout(1000);
+    }
+
+    // Convert Set to array and limit the results
+    return Array.from(userData).map((user) => JSON.parse(user)).slice(0, limit);
   }
 }
 
