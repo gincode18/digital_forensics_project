@@ -4,7 +4,7 @@ const TweetParser = require('./tweetParser');
 class TweetScraper {
   constructor(page) {
     this.page = page;
-    this.MAX_ITEMS = 5;
+    this.MAX_ITEMS = 3; // Changed from 5 to 3 for faster processing
   }
 
   async extractTweetData(tweetElement) {
@@ -88,6 +88,9 @@ class TweetScraper {
 
   async scrapeReplies(tweetId) {
     try {
+      logger.info(`Starting to scrape replies for tweet`, { tweetId });
+      const startTime = Date.now();
+      
       const replyPage = await this.page.browser().newPage();
       await replyPage.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
       
@@ -99,7 +102,7 @@ class TweetScraper {
       await replyPage.waitForSelector('[data-testid="tweet"]', { timeout: 5000 });
 
       const replies = await replyPage.evaluate(() => {
-        const replyElements = Array.from(document.querySelectorAll('[data-testid="tweet"]')).slice(1); // Skip original tweet
+        const replyElements = Array.from(document.querySelectorAll('[data-testid="tweet"]')).slice(1, 4); // Get only first 3 replies
         
         return replyElements.map(reply => {
           const text = reply.querySelector('[data-testid="tweetText"]')?.textContent || '';
@@ -107,7 +110,6 @@ class TweetScraper {
           const timeElement = reply.querySelector('time');
           const verified = !!reply.querySelector('[data-testid="icon-verified"]');
           
-          // Get engagement metrics
           const getLikes = () => {
             const likesElement = reply.querySelector('[data-testid="like"] span');
             if (!likesElement) return 0;
@@ -117,7 +119,6 @@ class TweetScraper {
             return parseInt(text.replace(/,/g, '')) || 0;
           };
 
-          // Extract hashtags and mentions using TweetParser-like logic
           const hashtags = (text.match(/#[\w\u0590-\u05ff]+/g) || []).map(tag => tag.toLowerCase());
           const mentions = (text.match(/@[\w]+/g) || []);
 
@@ -133,10 +134,17 @@ class TweetScraper {
         });
       });
 
-      // Sort by likes and get top 5
       const topReplies = replies
         .sort((a, b) => b.likes - a.likes)
         .slice(0, this.MAX_ITEMS);
+
+      const processingTime = Date.now() - startTime;
+      logger.info(`Completed scraping replies`, {
+        tweetId,
+        repliesFound: replies.length,
+        topRepliesReturned: topReplies.length,
+        processingTimeMs: processingTime
+      });
 
       await replyPage.close();
       return topReplies;
@@ -152,6 +160,9 @@ class TweetScraper {
 
   async scrapeRetweets(tweetId) {
     try {
+      logger.info(`Starting to scrape retweets for tweet`, { tweetId });
+      const startTime = Date.now();
+
       const retweetPage = await this.page.browser().newPage();
       await retweetPage.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
       
@@ -163,8 +174,8 @@ class TweetScraper {
       await retweetPage.waitForSelector('[data-testid="cellInnerDiv"]', { timeout: 5000 });
 
       const retweets = await retweetPage.evaluate(() => {
-        const retweetElements = document.querySelectorAll('[data-testid="cellInnerDiv"]');
-        return Array.from(retweetElements).map(retweet => {
+        const retweetElements = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).slice(0, 3); // Get only first 3 retweets
+        return retweetElements.map(retweet => {
           const username = retweet.querySelector('[data-testid="User-Name"] a')?.textContent || '';
           const displayName = retweet.querySelector('[data-testid="User-Name"] span')?.textContent || '';
           const verified = !!retweet.querySelector('[data-testid="icon-verified"]');
@@ -181,15 +192,22 @@ class TweetScraper {
             displayName,
             verified,
             followers: followerCount,
-            retweetDate: new Date().toISOString() // Current date as retweet date
+            retweetDate: new Date().toISOString()
           };
         });
       });
 
-      // Sort by follower count and get top 5
       const topRetweets = retweets
         .sort((a, b) => b.followers - a.followers)
         .slice(0, this.MAX_ITEMS);
+
+      const processingTime = Date.now() - startTime;
+      logger.info(`Completed scraping retweets`, {
+        tweetId,
+        retweetsFound: retweets.length,
+        topRetweetsReturned: topRetweets.length,
+        processingTimeMs: processingTime
+      });
 
       await retweetPage.close();
       return topRetweets;
