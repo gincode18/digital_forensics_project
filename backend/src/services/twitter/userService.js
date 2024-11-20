@@ -58,7 +58,7 @@ async function getTwitterUserDetails(username) {
         const website = getTextContent('[data-testid="UserUrl"]');
         
         const followingText = getTextContent('[href*="/following"] span');
-        const followersText = getTextContent('[href*="/followers"] span');
+        const followersText = getTextContent('[href*="/verified_followers"] span');
         
         const joinDate = getTextContent('[data-testid="UserJoinDate"]')
           .replace('Joined ', '');

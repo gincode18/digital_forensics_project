@@ -79,81 +79,54 @@ async function generateWordCloud(tweets) {
 }
 async function generateEngagementHeatmap(tweets) {
   try {
-    const canvas = new ChartJSNodeCanvas({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+    const canvas = new ChartJSNodeCanvas({ width: 800, height: 600 });
 
-    // Initialize engagement data matrix (7 days x 24 hours)
-    const engagementMatrix = Array(7).fill().map(() => Array(24).fill(0));
+    // Initialize engagement data for 24 hours
+    const hourlyEngagement = Array(24).fill(0);
 
-    // Aggregate engagement data
+    // Aggregate engagement data by hour
     tweets.forEach(tweet => {
       const date = new Date(tweet.date);
-      const day = date.getDay(); // 0-6 (Sunday-Saturday)
       const hour = date.getHours(); // 0-23
-      
+
       // Calculate total engagement for this tweet
       const engagement = tweet.likes + tweet.retweets + tweet.comments;
-      
-      // Add to matrix
-      engagementMatrix[day][hour] += engagement;
+
+      // Add to the corresponding hour's engagement
+      hourlyEngagement[hour] += engagement;
     });
 
     // Prepare data for Chart.js
+    const hourLabels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+
     const data = {
-      labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+      labels: hourLabels,
       datasets: [
         {
-          label: 'Sunday',
-          data: engagementMatrix[0],
-          backgroundColor: 'rgba(255, 99, 132, 0.5)',
-        },
-        {
-          label: 'Monday',
-          data: engagementMatrix[1],
-          backgroundColor: 'rgba(54, 162, 235, 0.5)',
-        },
-        {
-          label: 'Tuesday',
-          data: engagementMatrix[2],
-          backgroundColor: 'rgba(255, 206, 86, 0.5)',
-        },
-        {
-          label: 'Wednesday',
-          data: engagementMatrix[3],
-          backgroundColor: 'rgba(75, 192, 192, 0.5)',
-        },
-        {
-          label: 'Thursday',
-          data: engagementMatrix[4],
-          backgroundColor: 'rgba(153, 102, 255, 0.5)',
-        },
-        {
-          label: 'Friday',
-          data: engagementMatrix[5],
-          backgroundColor: 'rgba(255, 159, 64, 0.5)',
-        },
-        {
-          label: 'Saturday',
-          data: engagementMatrix[6],
-          backgroundColor: 'rgba(199, 199, 199, 0.5)',
+          label: 'Total Engagement',
+          data: hourlyEngagement,
+          backgroundColor: 'rgba(75, 192, 192, 0.7)', // Consistent color for all hours
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1,
         },
       ],
     };
 
     const config = {
-      type: 'bar',
+      type: 'bar', // Bar chart
       data,
       options: {
         responsive: true,
         plugins: {
           title: {
             display: true,
-            text: 'Engagement by Day and Hour',
+            text: 'Engagement by Hour (All Days)',
             font: {
               size: 16,
             },
           },
           legend: {
-            position: 'right',
+            display: false, // Only one dataset, no legend needed
           },
         },
         scales: {
@@ -162,25 +135,26 @@ async function generateEngagementHeatmap(tweets) {
               display: true,
               text: 'Hour of Day',
             },
-            stacked: true,
           },
           y: {
             title: {
               display: true,
               text: 'Total Engagement',
             },
-            stacked: true,
           },
         },
       },
     };
 
+    // Render the chart and return it as a buffer
     return await canvas.renderToBuffer(config);
   } catch (error) {
-    logger.error('Error generating Engagement Heatmap', { error: error.message });
+    console.error('Error generating Engagement Heatmap:', error);
     throw error;
   }
 }
+
+
 
 
 async function generateNetworkGraph(tweets, userDetails) {

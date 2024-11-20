@@ -72,8 +72,8 @@ router.post("/generatereport", async (req, res) => {
       verified: false,
       location: "India",
       stats: {
-        following: 2677,
-        followers: 0,
+        following: 2679,
+        followers: 103700000,
       },
     };
 
