@@ -2,7 +2,7 @@ const logger = require('../../config/logger');
 const twitterScraper = require('../../config/twitter');
 const ProfileScraper = require('./scrapers/profileScraper');
 
-async function getTwitterUserDetails(username, options = { includeFollowers: true, includeFollowing: false, limit: 3 }) {
+async function getTwitterUserDetails(username, options = { includeFollowers: true, includeFollowing: true, limit: 3 }) {
   logger.info(`Fetching Twitter user details`, { 
     username,
     includeFollowers: options.includeFollowers,
@@ -172,68 +172,44 @@ async function getTwitterUserDetails(username, options = { includeFollowers: tru
         includeFollowing: options.includeFollowing
       });
 
-      const tasks = [];
-
+  
       if (options.includeFollowers) {
-        logger.info(`Queueing followers scraping task`, { username, limit: options.limit });
-        tasks.push(
-          profileScraper.scrapeFollowers(username, options.limit)
-            .then(followers => {
-              logger.info(`Collected followers data`, {
-                username,
-                followersCount: followers.length
-              });
-              return { followers };
-            })
-            .catch(error => {
-              logger.error(`Failed to scrape followers`, {
-                username,
-                error: error.message,
-                stack: error.stack
-              });
-              return { followers: [] };
-            })
-        );
+        try {
+          logger.info(`Scraping followers`, { username, limit: options.limit });
+          const followers = await profileScraper.scrapeFollowers(username, options.limit);
+          enhancedData.followers = followers;
+          logger.info(`Successfully scraped followers`, {
+            username,
+            followersCount: followers.length
+          });
+        } catch (error) {
+          logger.error(`Failed to scrape followers`, {
+            username,
+            error: error.message,
+            stack: error.stack
+          });
+          enhancedData.followers = [];
+        }
       }
 
       if (options.includeFollowing) {
-        logger.info(`Queueing following scraping task`, { username, limit: options.limit });
-        tasks.push(
-          profileScraper.scrapeFollowing(username, options.limit)
-            .then(following => {
-              logger.info(`Collected following data`, {
-                username,
-                followingCount: following.length
-              });
-              return { following };
-            })
-            .catch(error => {
-              logger.error(`Failed to scrape following`, {
-                username,
-                error: error.message,
-                stack: error.stack
-              });
-              return { following: [] };
-            })
-        );
-      }
-
-      const results = await Promise.allSettled(tasks);
-      
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          Object.assign(enhancedData, result.value);
-          logger.info(`Successfully merged ${index === 0 ? 'followers' : 'following'} data`, {
+        try {
+          logger.info(`Scraping following`, { username, limit: options.limit });
+          const following = await profileScraper.scrapeFollowing(username, options.limit);
+          enhancedData.following = following;
+          logger.info(`Successfully scraped following`, {
             username,
-            dataType: index === 0 ? 'followers' : 'following'
+            followingCount: following.length
           });
-        } else {
-          logger.error(`Failed to fetch ${index === 0 ? 'followers' : 'following'}`, {
+        } catch (error) {
+          logger.error(`Failed to scrape following`, {
             username,
-            error: result.reason
+            error: error.message,
+            stack: error.stack
           });
+          enhancedData.following = [];
         }
-      });
+      }
     }
 
     logger.info(`Successfully completed profile data collection`, {

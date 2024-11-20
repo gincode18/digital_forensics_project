@@ -68,13 +68,53 @@ router.post("/generatereport", async (req, res) => {
       username: "narendramodi",
       bio: "Prime Minister of India",
       joined: "January 2009",
-      website: "narendramodi.in",
+      website: "https://t.co/m2qxixtyKj",
       verified: false,
       location: "India",
       stats: {
         following: 2679,
         followers: 103700000,
       },
+      followers: [
+        {
+          username: "PMO India",
+          displayName: "PMO India",
+          bio: "Click to Follow PMOIndia",
+          verified: false,
+        },
+        {
+          username: "Alia Bhatt",
+          displayName: "Alia Bhatt",
+          bio: "Click to Follow aliaa08",
+          verified: false,
+        },
+        {
+          username: "Virat Kohli",
+          displayName: "Virat Kohli",
+          bio: "Click to Follow imVkohli",
+          verified: false,
+        },
+      ],
+      following: [
+        {
+          username: "PMO India",
+          displayName: "PMO India",
+          bio: "Click to Follow PMOIndia",
+          verified: false,
+        },
+        {
+          username: "Virat Kohli",
+          displayName: "Virat Kohli",
+          bio: "Click to Follow imVkohli",
+          verified: false,
+        },
+        {
+          username: "President of India",
+          displayName: "President of India",
+          bio: "Click to Follow rashtrapatibhvn",
+          verified: false,
+        },
+      ],
     };
 
     const tweets = [
