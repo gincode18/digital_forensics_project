@@ -1,124 +1,127 @@
 const logger = require('../../config/logger');
 const twitterScraper = require('../../config/twitter');
+const TweetScraper = require('./scrapers/tweetScraper');
+const ProfileScraper = require('./scrapers/profileScraper');
 
 async function getUserTweets(username, mode, numberOfTweets) {
-  logger.info(`Fetching user tweets`, {
-    username,
-    mode,
-    numberOfTweets
-  });
+  // logger.info(`Fetching user tweets`, {
+  //   username,
+  //   mode,
+  //   numberOfTweets
+  // });
 
-  let page;
-  try {
+  // let page;
+  // try {
     page = await twitterScraper.getNewPage();
+    const scraper = new TweetScraper(page);
     
-    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
+  //   await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
     
-    await page.goto(`https://twitter.com/${username}`, {
-      waitUntil: ['networkidle0', 'domcontentloaded']
-    });
+  //   await page.goto(`https://twitter.com/${username}`, {
+  //     waitUntil: ['networkidle0', 'domcontentloaded']
+  //   });
 
-    await page.waitForSelector('article[data-testid="tweet"]');
+  //   await page.waitForSelector('article[data-testid="tweet"]');
 
-    let loadedTweets = new Set();
-    let previousHeight = 0;
-    let sameHeightCount = 0;
-    const maxRetries = 10;
+  //   let loadedTweets = new Set();
+  //   let previousHeight = 0;
+  //   let sameHeightCount = 0;
+  //   const maxRetries = 10;
     
-    while (loadedTweets.size < numberOfTweets && sameHeightCount < maxRetries) {
-      const newTweets = await extractTweets(page);
+  //   while (loadedTweets.size < numberOfTweets && sameHeightCount < maxRetries) {
+  //     const tweetElements = await page.$$('article[data-testid="tweet"]');
       
-      newTweets.forEach(tweet => {
-        if (tweet.id) {
-          loadedTweets.add(JSON.stringify(tweet));
-        }
-      });
+  //     for (const tweetElement of tweetElements) {
+  //       const tweet = await scraper.extractTweetData(tweetElement);
+  //       if (tweet.id) {
+  //         loadedTweets.add(JSON.stringify(tweet));
+  //       }
+  //     }
 
-      const currentHeight = await page.evaluate('document.documentElement.scrollHeight');
+  //     const currentHeight = await page.evaluate('document.documentElement.scrollHeight');
       
-      if (currentHeight === previousHeight) {
-        sameHeightCount++;
-        await handleSameHeight(page);
-      } else {
-        sameHeightCount = 0;
-      }
+  //     if (currentHeight === previousHeight) {
+  //       sameHeightCount++;
+  //       await handleSameHeight(page);
+  //     } else {
+  //       sameHeightCount = 0;
+  //     }
 
-      previousHeight = currentHeight;
-      await smoothScroll(page);
-      await page.waitForTimeout(1000 + Math.random() * 1000);
+  //     previousHeight = currentHeight;
+  //     await smoothScroll(page);
+  //     await page.waitForTimeout(1000 + Math.random() * 1000);
 
-      logger.info(`Found ${loadedTweets.size} unique tweets, target: ${numberOfTweets}`);
+  //     logger.info(`Found ${loadedTweets.size} unique tweets, target: ${numberOfTweets}`);
       
-      if (await checkRateLimiting(page)) {
-        logger.warn('Possible rate limiting detected');
-        break;
-      }
-    }
+  //     if (await checkRateLimiting(page)) {
+  //       logger.warn('Possible rate limiting detected');
+  //       break;
+  //     }
+  //   }
 
-    const uniqueTweets = Array.from(loadedTweets).map(tweet => JSON.parse(tweet));
+  //   const tweets = Array.from(loadedTweets).map(tweet => JSON.parse(tweet));
     
-    logger.info(`Successfully retrieved tweets`, {
-      username,
-      tweetCount: uniqueTweets.length,
-      requestedCount: numberOfTweets
-    });
+  //   // Enhanced tweets logging and processing
+  //   logger.info(`Starting enhanced data collection for ${tweets.length} tweets`);
+  //   const enhancedTweets = [];
+  //   for (const [index, tweet] of tweets.slice(0, numberOfTweets).entries()) {
+  //     logger.info(`Processing enhanced data for tweet ${index + 1}/${numberOfTweets}`, {
+  //       tweetId: tweet.id
+  //     });
+      
+  //     try {
+  //       const startTime = Date.now();
+  //       const [replies, retweets] = await Promise.all([
+  //         scraper.scrapeReplies(tweet.id),
+  //         scraper.scrapeRetweets(tweet.id)
+  //       ]);
 
-    return uniqueTweets.slice(0, numberOfTweets);
+  //       const processingTime = Date.now() - startTime;
+  //       logger.info(`Enhanced data collected for tweet ${index + 1}`, {
+  //         tweetId: tweet.id,
+  //         repliesCount: replies.length,
+  //         retweetsCount: retweets.length,
+  //         processingTimeMs: processingTime
+  //       });
 
-  } catch (error) {
-    logger.error(`Failed to fetch user tweets`, {
-      username,
-      error: error.message,
-      stack: error.stack
-    });
-    throw error;
-  } finally {
-    if (page) {
-      await twitterScraper.closePage(page);
-    }
-  }
-}
+  //       enhancedTweets.push({
+  //         ...tweet,
+  //         replies,
+  //         retweets
+  //       });
+  //     } catch (error) {
+  //       logger.warn(`Failed to fetch additional data for tweet ${tweet.id}`, {
+  //         error: error.message,
+  //         tweetIndex: index + 1
+  //       });
+  //       enhancedTweets.push(tweet);
+  //     }
+  //   }
 
-async function extractTweets(page) {
-  return await page.evaluate(() => {
-    const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
-    return tweets.map(tweet => {
-      const getTextContent = (selector) => {
-        const element = tweet.querySelector(selector);
-        return element ? element.textContent.trim() : '';
-      };
+  //   logger.info(`Successfully retrieved enhanced tweets`, {
+  //     username,
+  //     tweetCount: enhancedTweets.length,
+  //     requestedCount: numberOfTweets
+  //   });
 
-      const getMetricCount = (text) => {
-        if (!text) return 0;
-        text = text.toLowerCase();
-        if (text.includes('k')) {
-          return Math.round(parseFloat(text) * 1000);
-        } else if (text.includes('m')) {
-          return Math.round(parseFloat(text) * 1000000);
-        }
-        return parseInt(text.replace(/,/g, '')) || 0;
-      };
+  //   return enhancedTweets;
 
-      const tweetText = getTextContent('[data-testid="tweetText"]');
-      const timeElement = tweet.querySelector('time');
-      const tweetId = tweet.querySelector('a[href*="/status/"]')
-        ?.href?.match(/status\/(\d+)/)?.[1];
-
-      const likesText = getTextContent('[data-testid="like"] span');
-      const retweetsText = getTextContent('[data-testid="retweet"] span');
-      const repliesText = getTextContent('[data-testid="reply"] span');
-
-      return {
-        id: tweetId,
-        text: tweetText,
-        date: timeElement ? timeElement.getAttribute('datetime') : null,
-        likes: getMetricCount(likesText),
-        retweets: getMetricCount(retweetsText),
-        comments: getMetricCount(repliesText),
-        twitter_link: tweetId ? `https://twitter.com/${window.location.pathname.slice(1)}/status/${tweetId}` : ''
-      };
-    });
-  });
+  // } catch (error) {
+  //   logger.error(`Failed to fetch user tweets`, {
+  //     username,
+  //     error: error.message,
+  //     stack: error.stack
+  //   });
+  //   throw error;
+  // } finally {
+  //   if (page) {
+  //     await twitterScraper.closePage(page);
+  //   }
+  // }
+  const res = await scraper.scrapeReplies("1858991588187533428");
+  console.log('====================================');
+  console.log(res);
+  console.log('====================================');
 }
 
 async function handleSameHeight(page) {

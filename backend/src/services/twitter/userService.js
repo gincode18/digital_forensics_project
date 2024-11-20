@@ -2,7 +2,7 @@ const logger = require('../../config/logger');
 const twitterScraper = require('../../config/twitter');
 const ProfileScraper = require('./scrapers/profileScraper');
 
-async function getTwitterUserDetails(username, options = { includeFollowers: true, includeFollowing: true, limit: 3 }) {
+async function getTwitterUserDetails(username, options = { includeFollowers: true, includeFollowing: true, limit: 10 }) {
   logger.info(`Fetching Twitter user details`, { 
     username,
     includeFollowers: options.includeFollowers,
